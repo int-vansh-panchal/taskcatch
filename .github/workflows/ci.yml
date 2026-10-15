@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
 
       - name: Install Dependencies
@@ -51,7 +51,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
 
       - name: Install Dependencies
@@ -60,7 +60,7 @@ jobs:
       - name: Setup Environment
         run: |
           cp .env.example .env
-          echo "DATABASE_URL=postgresql://taskcatch:taskcatch_dev_secret@localhost:5433/taskcatch" >> .env
+          sed -i "s/your_postgres_password/taskcatch_dev_secret/g" .env
           echo "COOKIE_SECRET=taskcatch_ci_testing_cookie_secret_32_chars_min" >> .env
 
       - name: Run Drizzle Migrations

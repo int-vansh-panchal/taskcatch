@@ -1,10 +1,14 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { dbQueries } from "../db/queries.js";
-import { pool } from "../db/index.js";
+import { initDatabase, pool } from "../db/index.js";
 import { config } from "../config.js";
 
 describe("Reminder Engine Deduplication & Scheduling", () => {
   const testUserId = config.defaultUserId;
+
+  beforeAll(async () => {
+    await initDatabase();
+  });
 
   afterAll(async () => {
     await pool.end();
