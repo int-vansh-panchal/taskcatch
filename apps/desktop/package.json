@@ -5,7 +5,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "tsc && electron .",
+    "start": "tsc && electron . --no-sandbox",
     "pack": "tsc && electron-builder --dir",
     "dist": "tsc && electron-builder --linux deb AppImage"
   },
