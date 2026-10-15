@@ -102,6 +102,7 @@ export interface TranscriptSegment {
   speaker: string;
   text_original: string;
   text_english: string;
+  confidence?: number;
 }
 
 export interface Bookmark {
@@ -188,6 +189,7 @@ export interface SpeechSegmentResult {
   speaker: string;
   text_original: string;
   text_english: string;
+  confidence?: number;
 }
 
 export interface SpeechTranscriptionResult {
@@ -198,7 +200,8 @@ export interface SpeechTranscriptionResult {
 
 export interface SpeechProvider {
   name: string;
-  transcribe(audioFilePath: string, vocabularyHints?: string): Promise<SpeechTranscriptionResult>;
+  transcribe(audioFilePath: string, vocabularyHints?: string, options?: { task?: "transcribe" | "translate"; modelSize?: string }): Promise<SpeechTranscriptionResult>;
+  healthCheck?(): Promise<{ ok: boolean; message?: string }>;
 }
 
 export interface LLMProvider {
@@ -207,8 +210,10 @@ export interface LLMProvider {
     segments: SpeechSegmentResult[],
     bookmarks: Bookmark[],
     sessionDate: Date,
-    timezone: string
+    timezone: string,
+    options?: { model?: string; vocabularyHints?: string }
   ): Promise<ExtractionPipelineResult>;
+  healthCheck?(): Promise<{ ok: boolean; message?: string }>;
 }
 
 // ── WebSocket Realtime Events ───────────────────────────────────────────────

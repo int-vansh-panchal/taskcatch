@@ -619,4 +619,59 @@ export const dbQueries = {
       created_at: toIso(row.created_at) || new Date().toISOString(),
     }));
   },
+
+  // ── Settings ───────────────────────────────────────────────────────────────
+  async getSettings(userId: string): Promise<any> {
+    const res = await pool.query(`SELECT * FROM settings WHERE user_id = $1`, [userId]);
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    return {
+      ...r,
+      reminder_offsets_minutes:
+        typeof r.reminder_offsets_minutes === "string"
+          ? JSON.parse(r.reminder_offsets_minutes)
+          : r.reminder_offsets_minutes || [1440, 60, 0],
+      updated_at: toIso(r.updated_at) || new Date().toISOString(),
+    };
+  },
+
+  async updateSettings(userId: string, data: Record<string, any>): Promise<any> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [k, v] of Object.entries(data)) {
+      if (k === "user_id" || k === "updated_at") continue;
+      fields.push(`${k} = $${idx++}`);
+      values.push(k === "reminder_offsets_minutes" ? JSON.stringify(v) : v);
+    }
+
+    if (fields.length === 0) {
+      return this.getSettings(userId);
+    }
+
+    fields.push(`updated_at = now()`);
+    values.push(userId);
+
+    const res = await pool.query(
+      `
+      UPDATE settings
+      SET ${fields.join(", ")}
+      WHERE user_id = $${idx}
+      RETURNING *
+      `,
+      values
+    );
+
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    return {
+      ...r,
+      reminder_offsets_minutes:
+        typeof r.reminder_offsets_minutes === "string"
+          ? JSON.parse(r.reminder_offsets_minutes)
+          : r.reminder_offsets_minutes || [1440, 60, 0],
+      updated_at: toIso(r.updated_at) || new Date().toISOString(),
+    };
+  },
 };

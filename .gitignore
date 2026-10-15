@@ -57,3 +57,5 @@ pnpm-debug.log*
 
 # Model cache
 .cache_models/
+benchmark_output/
+

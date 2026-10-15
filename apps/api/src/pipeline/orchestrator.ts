@@ -5,18 +5,18 @@ import {
   ExtractionPipelineResultSchema,
   type SpeechProvider,
   type LLMProvider,
+  type SpeechSegmentResult,
 } from "@taskcatch/shared";
-import { MockSpeechProvider } from "../providers/mockSpeechProvider.js";
-import { MockLLMProvider } from "../providers/mockLLMProvider.js";
+import { ProviderFactory } from "../providers/factory.js";
 import { config } from "../config.js";
 
 export class PipelineOrchestrator {
-  private defaultSpeechProvider: SpeechProvider;
-  private defaultLLMProvider: LLMProvider;
+  private defaultSpeechProvider?: SpeechProvider;
+  private defaultLLMProvider?: LLMProvider;
 
   constructor(speechProvider?: SpeechProvider, llmProvider?: LLMProvider) {
-    this.defaultSpeechProvider = speechProvider || new MockSpeechProvider();
-    this.defaultLLMProvider = llmProvider || new MockLLMProvider();
+    this.defaultSpeechProvider = speechProvider;
+    this.defaultLLMProvider = llmProvider;
   }
 
   async processSession(
@@ -30,12 +30,21 @@ export class PipelineOrchestrator {
     }
 
     if (session.status === "processed") {
-      // Idempotency: skip if already processed
-      return;
+      return; // Idempotent
     }
 
-    const speechProvider = customSpeechProvider || this.defaultSpeechProvider;
-    const llmProvider = customLLMProvider || this.defaultLLMProvider;
+    // Load user settings for provider selection & parameters
+    const userSettings = await dbQueries.getSettings(session.user_id);
+
+    const speechProvider =
+      customSpeechProvider ||
+      this.defaultSpeechProvider ||
+      (await ProviderFactory.getSpeechProvider(userSettings?.speech_provider));
+
+    const llmProvider =
+      customLLMProvider ||
+      this.defaultLLMProvider ||
+      (await ProviderFactory.getLLMProvider(userSettings?.llm_provider, userSettings?.llm_model));
 
     // 1. Mark session as processing
     const processingSession = await dbQueries.updateSession(sessionId, { status: "processing" });
@@ -49,10 +58,18 @@ export class PipelineOrchestrator {
     try {
       const audioPath = session.audio_path || "mock_audio.wav";
 
-      // 2. Transcribe Audio
-      const sttResult = await speechProvider.transcribe(audioPath);
+      // 2. Transcribe Audio (Single pass by default; dual pass only if configured)
+      const dualPassEnabled = userSettings?.whisper_dual_pass ?? false;
+      const sttResult = await speechProvider.transcribe(
+        audioPath,
+        userSettings?.vocabulary_hints || undefined,
+        {
+          task: dualPassEnabled ? "translate" : "transcribe",
+          modelSize: userSettings?.speech_model || "small",
+        }
+      );
 
-      // Save segments
+      // Save segments to Postgres
       await dbQueries.insertSegments(sessionId, sttResult.segments);
 
       // 3. Load Bookmarks
@@ -60,113 +77,27 @@ export class PipelineOrchestrator {
 
       // 4. Translate & Extract Tasks via LLM
       const sessionDate = new Date(session.created_at);
-      let rawExtraction = await llmProvider.translateAndExtract(
+      const extraction = await llmProvider.translateAndExtract(
         sttResult.segments,
         bookmarks,
         sessionDate,
-        config.timezone
+        config.timezone,
+        {
+          model: userSettings?.llm_model,
+          vocabularyHints: userSettings?.vocabulary_hints || undefined,
+        }
       );
 
-      // 5. Zod Validation with 1 Repair Fallback
-      let validated = ExtractionPipelineResultSchema.safeParse(rawExtraction);
-      if (!validated.success) {
-        console.warn("[Pipeline] Extraction schema validation failed, retrying repair...");
-        rawExtraction = await llmProvider.translateAndExtract(
-          sttResult.segments,
-          bookmarks,
-          sessionDate,
-          config.timezone
-        );
-        validated = ExtractionPipelineResultSchema.safeParse(rawExtraction);
-        if (!validated.success) {
-          throw new Error(`Extraction validation failed: ${validated.error.message}`);
-        }
-      }
+      await this.saveExtractedTasksAndNotes(session, extraction, bookmarks);
 
-      const { summary, fyi_notes, tasks } = validated.data;
-
-      // 6. Save Extracted Tasks & Schedule Default Reminders
-      const createdTasks = [];
-      for (const t of tasks) {
-        const created = await dbQueries.createTask({
-          userId: session.user_id,
-          sessionId: session.id,
-          title: t.title,
-          description: t.description,
-          requestedBy: t.requested_by,
-          dueAt: t.due_at,
-          priority: t.priority,
-          status: "needs_review",
-          tags: t.tags,
-          sourceQuoteOriginal: t.source_quote_original,
-          sourceQuoteEnglish: t.source_quote_english,
-          startMs: t.start_ms,
-          endMs: t.end_ms,
-          confidence: t.confidence,
-          needsClarification: t.needs_clarification,
-          clarificationQuestion: t.clarification_question,
-        });
-
-        createdTasks.push(created);
-
-        // Schedule default reminders if task has due_at
-        if (created.due_at) {
-          const dueTime = new Date(created.due_at).getTime();
-          const oneDayBefore = new Date(dueTime - 24 * 60 * 60 * 1000);
-          const oneHourBefore = new Date(dueTime - 60 * 60 * 1000);
-          const now = Date.now();
-
-          // 1 day before (if still in future)
-          if (oneDayBefore.getTime() > now) {
-            await dbQueries.createReminder({
-              userId: session.user_id,
-              taskId: created.id,
-              fireAt: oneDayBefore.toISOString(),
-              channel: "fcm",
-            });
-          }
-
-          // 1 hour before
-          if (oneHourBefore.getTime() > now) {
-            await dbQueries.createReminder({
-              userId: session.user_id,
-              taskId: created.id,
-              fireAt: oneHourBefore.toISOString(),
-              channel: "fcm",
-            });
-          }
-
-          // At due time
-          if (dueTime > now) {
-            await dbQueries.createReminder({
-              userId: session.user_id,
-              taskId: created.id,
-              fireAt: new Date(dueTime).toISOString(),
-              channel: "fcm",
-            });
-          }
-        }
-      }
-
-      // 7. Save FYI Notes
-      for (const note of fyi_notes) {
-        await dbQueries.createNote({
-          sessionId: session.id,
-          userId: session.user_id,
-          content: note,
-          tags: ["fyi"],
-        });
-      }
-
-      // 8. Update Session to Processed
+      // 5. Update Session to Processed
       const completedSession = await dbQueries.updateSession(sessionId, {
         status: "processed",
-        summary,
+        summary: extraction.summary,
         language_detected: sttResult.language_detected,
       });
 
       if (completedSession) {
-        // Emit WebSocket Realtime Events
         wsService.broadcastToUser(session.user_id, {
           type: "session.updated",
           session: completedSession,
@@ -174,17 +105,17 @@ export class PipelineOrchestrator {
         wsService.broadcastToUser(session.user_id, {
           type: "session.processed",
           sessionId: session.id,
-          tasksCount: createdTasks.length,
+          tasksCount: extraction.tasks.length,
         });
 
         // Trigger FCM Push notification
         await sendPushNotification({
           userId: session.user_id,
-          title: "Session Processed",
-          body: `${createdTasks.length} new tasks extracted from conversation need review.`,
+          title: "Tasks Extracted",
+          body: `${extraction.tasks.length} new tasks extracted from conversation need review.`,
           payload: {
             sessionId: session.id,
-            tasksCount: createdTasks.length,
+            tasksCount: extraction.tasks.length,
           },
         });
       }
@@ -193,6 +124,144 @@ export class PipelineOrchestrator {
       await dbQueries.updateSession(sessionId, { status: "failed" });
       throw err;
     }
+  }
+
+  /**
+   * Re-run only task extraction on an existing session (useful after editing segments or adding bookmarks).
+   */
+  async reExtractSession(sessionId: string, customLLMProvider?: LLMProvider): Promise<void> {
+    const session = await dbQueries.getSession(sessionId);
+    if (!session) throw new Error(`Session ${sessionId} not found`);
+
+    const userSettings = await dbQueries.getSettings(session.user_id);
+    const llmProvider =
+      customLLMProvider ||
+      this.defaultLLMProvider ||
+      (await ProviderFactory.getLLMProvider(userSettings?.llm_provider, userSettings?.llm_model));
+
+    const dbSegments = await dbQueries.getSegments(sessionId);
+    const speechSegments: SpeechSegmentResult[] = dbSegments.map((s) => ({
+      start_ms: s.start_ms,
+      end_ms: s.end_ms,
+      speaker: s.speaker,
+      text_original: s.text_original,
+      text_english: s.text_english,
+      confidence: s.confidence,
+    }));
+
+    const bookmarks = await dbQueries.getBookmarks(sessionId);
+    const sessionDate = new Date(session.created_at);
+
+    const extraction = await llmProvider.translateAndExtract(
+      speechSegments,
+      bookmarks,
+      sessionDate,
+      config.timezone,
+      {
+        model: userSettings?.llm_model,
+        vocabularyHints: userSettings?.vocabulary_hints || undefined,
+      }
+    );
+
+    // Delete existing unconfirmed tasks from this session
+    await this.saveExtractedTasksAndNotes(session, extraction, bookmarks);
+
+    await dbQueries.updateSession(sessionId, {
+      summary: extraction.summary,
+    });
+
+    wsService.broadcastToUser(session.user_id, {
+      type: "session.processed",
+      sessionId: session.id,
+      tasksCount: extraction.tasks.length,
+    });
+  }
+
+  private async saveExtractedTasksAndNotes(
+    session: any,
+    extraction: any,
+    bookmarks: any[]
+  ): Promise<any[]> {
+    const createdTasks = [];
+
+    for (const t of extraction.tasks) {
+      // Confidence boosting near bookmarks (within 15 seconds)
+      let confidence = t.confidence ?? 0.8;
+      const isNearBookmark = bookmarks.some(
+        (b) => Math.abs(b.timestamp_ms - t.start_ms) < 15000 || Math.abs(b.timestamp_ms - t.end_ms) < 15000
+      );
+      if (isNearBookmark) {
+        confidence = Math.min(1.0, confidence + 0.15);
+      }
+
+      const created = await dbQueries.createTask({
+        userId: session.user_id,
+        sessionId: session.id,
+        title: t.title,
+        description: t.description,
+        requestedBy: t.requested_by,
+        dueAt: t.due_at,
+        priority: t.priority,
+        status: "needs_review",
+        tags: t.tags,
+        sourceQuoteOriginal: t.source_quote_original,
+        sourceQuoteEnglish: t.source_quote_english,
+        startMs: t.start_ms,
+        endMs: t.end_ms,
+        confidence,
+        needsClarification: t.needs_clarification,
+        clarificationQuestion: t.clarification_question,
+      });
+
+      createdTasks.push(created);
+
+      // Schedule default reminders if task has due_at
+      if (created.due_at) {
+        const dueTime = new Date(created.due_at).getTime();
+        const oneDayBefore = new Date(dueTime - 24 * 60 * 60 * 1000);
+        const oneHourBefore = new Date(dueTime - 60 * 60 * 1000);
+        const now = Date.now();
+
+        if (oneDayBefore.getTime() > now) {
+          await dbQueries.createReminder({
+            userId: session.user_id,
+            taskId: created.id,
+            fireAt: oneDayBefore.toISOString(),
+            channel: "fcm",
+          });
+        }
+
+        if (oneHourBefore.getTime() > now) {
+          await dbQueries.createReminder({
+            userId: session.user_id,
+            taskId: created.id,
+            fireAt: oneHourBefore.toISOString(),
+            channel: "fcm",
+          });
+        }
+
+        if (dueTime > now) {
+          await dbQueries.createReminder({
+            userId: session.user_id,
+            taskId: created.id,
+            fireAt: new Date(dueTime).toISOString(),
+            channel: "fcm",
+          });
+        }
+      }
+    }
+
+    // Save FYI Notes
+    for (const note of extraction.fyi_notes || []) {
+      await dbQueries.createNote({
+        sessionId: session.id,
+        userId: session.user_id,
+        content: note,
+        tags: ["fyi"],
+      });
+    }
+
+    return createdTasks;
   }
 }
 

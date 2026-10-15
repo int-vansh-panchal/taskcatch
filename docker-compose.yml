@@ -4,18 +4,24 @@ services:
     container_name: taskcatch-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: taskcatch
-      POSTGRES_USER: taskcatch
-      POSTGRES_PASSWORD: taskcatch_dev_secret
+      POSTGRES_DB: ${POSTGRES_DB:-taskcatch}
+      POSTGRES_USER: ${POSTGRES_USER:-taskcatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskcatch_dev_secret}
+    command: postgres -c shared_buffers=128MB -c max_connections=40 -c work_mem=4MB -c maintenance_work_mem=32MB
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U taskcatch -d taskcatch"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskcatch} -d ${POSTGRES_DB:-taskcatch}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
 volumes:
   postgres_data:
+

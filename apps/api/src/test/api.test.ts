@@ -95,5 +95,53 @@ describe("Fastify API Endpoints with PostgreSQL", () => {
     expect(getRes.statusCode).toBe(200);
     const sessionDetail = JSON.parse(getRes.payload);
     expect(sessionDetail.session.id).toBe(session.id);
+
+    // Test Export
+    const exportRes = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/export`,
+    });
+    expect(exportRes.statusCode).toBe(200);
+    const exported = JSON.parse(exportRes.payload);
+    expect(exported.session.id).toBe(session.id);
+
+    // Test Delete
+    const deleteRes = await app.inject({
+      method: "DELETE",
+      url: `/api/sessions/${session.id}`,
+    });
+    expect(deleteRes.statusCode).toBe(200);
+  });
+
+  it("GET /api/settings/providers/status and vocabulary import/export", async () => {
+    const statusRes = await app.inject({
+      method: "GET",
+      url: "/api/settings/providers/status",
+    });
+    expect(statusRes.statusCode).toBe(200);
+    const status = JSON.parse(statusRes.payload);
+    expect(status).toHaveProperty("speech");
+    expect(status).toHaveProperty("llm");
+
+    // Import vocabulary
+    const importRes = await app.inject({
+      method: "POST",
+      url: "/api/settings/vocabulary/import",
+      payload: {
+        words: ["solar", "inverter", "modbus", "firmware"],
+      },
+    });
+    expect(importRes.statusCode).toBe(200);
+    const imported = JSON.parse(importRes.payload);
+    expect(imported.totalCount).toBeGreaterThanOrEqual(4);
+
+    // Export vocabulary
+    const exportRes = await app.inject({
+      method: "GET",
+      url: "/api/settings/vocabulary/export",
+    });
+    expect(exportRes.statusCode).toBe(200);
+    const exported = JSON.parse(exportRes.payload);
+    expect(exported.vocabulary).toContain("solar");
   });
 });

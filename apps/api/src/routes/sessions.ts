@@ -174,49 +174,142 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.status(201).send({ session });
   });
 
-  // ── Reprocess Session ──────────────────────────────────────────────────────
-  fastify.post("/:id/reprocess", async (req, reply) => {
+  // ── Edit Transcript Segment ────────────────────────────────────────────────
+  fastify.patch("/:id/segments/:segmentId", async (req, reply) => {
+    const { id, segmentId } = req.params as { id: string; segmentId: string };
+    const body = req.body as {
+      textOriginal?: string;
+      textEnglish?: string;
+    };
+
+    const session = await dbQueries.getSession(id);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    const client = await (await import("../db/index.js")).pool.connect();
+    try {
+      const updates = [];
+      const values: any[] = [];
+      let i = 1;
+
+      if (body.textOriginal !== undefined) {
+        updates.push(`text_original = $${i++}`);
+        values.push(body.textOriginal);
+      }
+      if (body.textEnglish !== undefined) {
+        updates.push(`text_english = $${i++}`);
+        values.push(body.textEnglish);
+      }
+
+      if (updates.length > 0) {
+        values.push(segmentId);
+        values.push(id);
+        await client.query(
+          `UPDATE transcript_segments SET ${updates.join(", ")} WHERE id = $${i++} AND session_id = $${i++}`,
+          values
+        );
+      }
+    } finally {
+      client.release();
+    }
+
+    return reply.send({ success: true, message: "Segment updated" });
+  });
+
+  // ── Re-extract Tasks Only (Without Re-transcribing Audio) ───────────────────
+  fastify.post("/:id/re-extract", async (req, reply) => {
     const { id } = req.params as { id: string };
     const session = await dbQueries.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
 
-    await dbQueries.updateSession(id, { status: "uploaded" });
-    await jobQueue.enqueueJob("process_session", { sessionId: id });
+    const { pipelineOrchestrator } = await import("../pipeline/orchestrator.js");
+    await pipelineOrchestrator.reExtractSession(id);
 
-    return reply.send({ success: true, message: "Session enqueued for reprocessing" });
+    return reply.send({ success: true, message: "Re-extraction completed" });
   });
 
-  // ── Stream Audio ───────────────────────────────────────────────────────────
-  fastify.get("/:id/audio", async (req, reply) => {
+  // ── Export Session Data (One-click JSON export) ─────────────────────────────
+  fastify.get("/:id/export", async (req, reply) => {
     const { id } = req.params as { id: string };
     const session = await dbQueries.getSession(id);
-    if (!session || !session.audio_path || !fs.existsSync(session.audio_path)) {
-      return reply.status(404).send({ error: "Audio not found" });
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    const segments = await dbQueries.getSegments(id);
+    const bookmarks = await dbQueries.getBookmarks(id);
+    const tasks = await dbQueries.listTasks({ userId: session.user_id, sessionId: id });
+    const notes = await dbQueries.getSessionNotes(id);
+
+    reply.header("Content-Disposition", `attachment; filename="taskcatch_session_${id}.json"`);
+    return reply.send({
+      exported_at: new Date().toISOString(),
+      session,
+      segments,
+      bookmarks,
+      tasks,
+      notes,
+    });
+  });
+
+  // ── Delete Session (Full delete) ───────────────────────────────────────────
+  fastify.delete("/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const session = await dbQueries.getSession(id);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    // Remove audio file if exists
+    if (session.audio_path && fs.existsSync(session.audio_path)) {
+      try {
+        fs.unlinkSync(session.audio_path);
+      } catch (err) {
+        console.warn(`[Sessions] Could not delete file ${session.audio_path}:`, err);
+      }
     }
 
-    const stat = fs.statSync(session.audio_path);
-    const range = req.headers.range;
-
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
-      const chunksize = end - start + 1;
-      const file = fs.createReadStream(session.audio_path, { start, end });
-
-      reply.raw.writeHead(206, {
-        "Content-Range": `bytes ${start}-${end}/${stat.size}`,
-        "Accept-Ranges": "bytes",
-        "Content-Length": chunksize,
-        "Content-Type": "audio/wav",
-      });
-      return file.pipe(reply.raw);
-    } else {
-      reply.raw.writeHead(200, {
-        "Content-Length": stat.size,
-        "Content-Type": "audio/wav",
-      });
-      return fs.createReadStream(session.audio_path).pipe(reply.raw);
+    const client = await (await import("../db/index.js")).pool.connect();
+    try {
+      await client.query("DELETE FROM sessions WHERE id = $1", [id]);
+    } finally {
+      client.release();
     }
+
+    return reply.send({ success: true, message: "Session deleted" });
+  });
+
+  // ── Retention Cleanup: Auto-delete audio after N days ───────────────────────
+  fastify.post("/cleanup-audio", async (req, reply) => {
+    const userId = (req as any).user?.id || config.defaultUserId;
+    const userSettings = await dbQueries.getSettings(userId);
+    const retentionDays = userSettings?.retention_days || 30;
+
+    const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const client = await (await import("../db/index.js")).pool.connect();
+    let cleanedCount = 0;
+
+    try {
+      const res = await client.query(
+        "SELECT id, audio_path FROM sessions WHERE created_at < $1 AND audio_path IS NOT NULL",
+        [cutoffDate.toISOString()]
+      );
+
+      for (const row of res.rows) {
+        if (row.audio_path && fs.existsSync(row.audio_path)) {
+          fs.unlinkSync(row.audio_path);
+          cleanedCount++;
+        }
+      }
+
+      await client.query(
+        "UPDATE sessions SET audio_path = NULL WHERE created_at < $1 AND audio_path IS NOT NULL",
+        [cutoffDate.toISOString()]
+      );
+    } finally {
+      client.release();
+    }
+
+    return reply.send({
+      success: true,
+      retentionDays,
+      cleanedFiles: cleanedCount,
+      message: `Cleaned ${cleanedCount} expired audio files older than ${retentionDays} days. Transcripts and tasks preserved.`,
+    });
   });
 };

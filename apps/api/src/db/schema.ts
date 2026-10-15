@@ -21,7 +21,10 @@ export const tsvector = customType<{ data: string }>({
 // ── Users ────────────────────────────────────────────────────────────────────
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
+  email: text("email").unique(),
   name: text("name").notNull(),
+  password_hash: text("password_hash"),
+  refresh_token: text("refresh_token"),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -60,6 +63,8 @@ export const sessions = pgTable(
     }).notNull(),
     summary: text("summary"),
     language_detected: text("language_detected"),
+    chunk_count: integer("chunk_count").default(0).notNull(),
+    last_checkpoint_ms: integer("last_checkpoint_ms").default(0).notNull(),
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -82,6 +87,7 @@ export const transcriptSegments = pgTable(
     speaker: text("speaker").default("Speaker 1").notNull(),
     text_original: text("text_original").notNull(),
     text_english: text("text_english").notNull(),
+    confidence: doublePrecision("confidence").default(1.0).notNull(),
     search_vector: tsvector("search_vector"),
   },
   (table) => ({
@@ -221,8 +227,18 @@ export const settings = pgTable("settings", {
   reminder_offsets_minutes: jsonb("reminder_offsets_minutes").default([1440, 60, 0]).notNull(),
   vocabulary_hints: text("vocabulary_hints").default("").notNull(),
   speech_provider: text("speech_provider").default("faster-whisper").notNull(),
+  speech_model: text("speech_model").default("small").notNull(),
   llm_provider: text("llm_provider").default("ollama").notNull(),
+  llm_model: text("llm_model").default("qwen2.5:7b-instruct").notNull(),
+  profile: text("profile", { enum: ["fast", "accurate"] }).default("accurate").notNull(),
+  whisper_dual_pass: boolean("whisper_dual_pass").default(false).notNull(),
+  retention_days: integer("retention_days").default(30).notNull(),
+  working_hours_start: text("working_hours_start").default("09:00").notNull(),
+  working_hours_end: text("working_hours_end").default("19:00").notNull(),
   quiet_hours_start: text("quiet_hours_start").default("22:00").notNull(),
   quiet_hours_end: text("quiet_hours_end").default("08:00").notNull(),
+  enable_gemini_fallback: boolean("enable_gemini_fallback").default(false).notNull(),
+  gemini_api_key: text("gemini_api_key").default("").notNull(),
+  consent_acknowledged: boolean("consent_acknowledged").default(false).notNull(),
   updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
