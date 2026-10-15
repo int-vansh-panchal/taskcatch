@@ -1,0 +1,16 @@
+[Unit]
+Description=TaskCatch PostgreSQL 16 Container
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/taskcatch
+ExecStart=/usr/bin/docker compose up -d postgres
+ExecStop=/usr/bin/docker compose stop postgres
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

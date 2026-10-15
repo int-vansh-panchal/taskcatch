@@ -45,6 +45,21 @@ const HINDI_WEEKDAYS: Record<string, number> = {
   shukra: 5,
   shani: 6,
   ravi: 0,
+  // Gujarati script weekdays
+  "સોમવાર": 1,
+  "સોમવારે": 1,
+  "મંગળવાર": 2,
+  "મંગળવારે": 2,
+  "બુધવાર": 3,
+  "બુધવારે": 3,
+  "ગુરુવાર": 4,
+  "ગુરુવારે": 4,
+  "શુક્રવાર": 5,
+  "શુક્રવારે": 5,
+  "શનિવાર": 6,
+  "શનિવારે": 6,
+  "રવિવાર": 0,
+  "રવિવારે": 0,
 };
 
 export function resolveIndianRelativeDate(
@@ -103,8 +118,8 @@ export function resolveIndianRelativeDate(
     return target.toISOString();
   }
 
-  // 3. "kal" / "tomorrow" / "આવતીકાલે"
-  if (raw.includes("kal") || raw.includes("tomorrow") || raw.includes("આવતીકાલે")) {
+  // 3. "kal" / "tomorrow" / "આવતીકાલે" / "કાલે"
+  if (raw.includes("kal") || raw.includes("tomorrow") || raw.includes("આવતીકાલે") || raw.includes("કાલે")) {
     target.setDate(target.getDate() + 1);
     target.setHours(targetHour, targetMinute, 0, 0);
     return target.toISOString();

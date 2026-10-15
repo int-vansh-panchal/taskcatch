@@ -64,6 +64,11 @@ export function initFirebase(): boolean {
   }
 
   try {
+    if (serviceAccount.projectId?.toLowerCase().includes("intellisolar")) {
+      console.warn("\n⚠️ [Firebase Warning] Configured project is the IntelliSolar CRM project!");
+      console.warn("TaskCatch recommends creating a dedicated free Firebase personal project (Spark plan) to keep personal task notifications separate. See docs/FIREBASE_SETUP.md.\n");
+    }
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });

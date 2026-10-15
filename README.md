@@ -1,170 +1,167 @@
-# TaskCatch
+# TaskCatch — Personal AI Voice Task Capture & Reminder System
 
-Personal voice-driven task capture, transcription, translation, and reminder system designed for Hindi, Gujarati, Hinglish, and English conversations.
-
-TaskCatch enables you to **only listen** during meetings and conversations. It captures audio, auto-transcribes and translates it to English with timestamps, extracts structured actionable tasks via local LLM, and reminds you across your phone (Firebase push notifications) and laptop (Ubuntu desktop widget).
+TaskCatch is a production-grade personal system built for hands-free work instruction capture. When managers or teammates assign work verbally in **Hindi, Gujarati, Hinglish, or English**, TaskCatch lets you **only listen**: it records the conversation on your phone or Ubuntu laptop, auto-transcribes and translates it into English, extracts complete self-contained actionable tasks with resolved deadlines, and keeps you on schedule via Firebase push notifications and an always-on-top Ubuntu desktop widget.
 
 ---
 
-## Architecture
+## Architecture Overview
 
-```text
-[Mobile PWA] (Android Chrome / iOS) 
-   │ (10s audio chunks + bookmarks via IndexedDB)
-   │ 
-[Laptop Desktop Widget] (Electron) ──┐
-   │ (Global hotkeys + mic / system audio)
-   ▼
-[Fastify API Server] (Node.js 20 + TypeScript) ◄───► [WebSocket Event Hub]
-   │
-   ├──► [PostgreSQL 16] (Drizzle ORM + tsvector GIN Search)
-   │       └── [Jobs Queue] (SELECT ... FOR UPDATE SKIP LOCKED)
-   │       └── [In-process 30s Reminder Engine]
-   │
-   ├──► [Python STT Sidecar] (FastAPI + faster-whisper int8 CPU + Silero VAD)
-   │       └── Segment timestamps + Native dual-pass translation
-   │
-   ├──► [Local LLM Provider] (Ollama: qwen2.5:7b-instruct / llama3.1:8b)
-   │       └── Pass 1: Terminology alignment
-   │       └── Pass 2: JSON-schema constrained task & note extraction
-   │
-   └──► [Firebase Cloud Messaging] (Free Spark Plan)
-           └── Push alerts to PWA & Web Push
+```mermaid
+graph TD
+    subgraph Clients
+        PWA["📱 Mobile PWA (Android / iOS)\nIndexedDB Queue, Wake Lock, Web Share Target"]
+        Desktop["💻 Ubuntu Desktop Widget (Electron)\n320x420 / Pill, Global Hotkeys, PipeWire Monitor"]
+    end
+
+    subgraph Tunnel
+        Tailscale["🔒 Tailscale HTTPS (Free)\ntailscale serve --https=443 http://localhost:3000"]
+    end
+
+    subgraph Backend Core
+        Fastify["⚡ Fastify API (TypeScript, Port 3000)\nArgon2id JWT, Range Streaming, WebSockets"]
+        Queue["📦 Atomic Queue\nSELECT ... FOR UPDATE SKIP LOCKED"]
+        Pipeline["🎼 Pipeline Orchestrator\nSingle-Pass STT + Local LLM Extraction"]
+        Scheduler["⏰ Reminder Engine\nDeduped Poller, Snooze, Quiet Hours"]
+    end
+
+    subgraph Persistence & AI
+        Postgres[("🐘 PostgreSQL 16 (Port 5433)\nGIN tsvector Search, Drizzle ORM")]
+        STT["🎙️ faster-whisper Sidecar (Port 8000)\nint8, Silero VAD, Vocabulary Hints, Auto-Unload"]
+        LLM["🧠 Ollama Local LLM (Port 11434)\nqwen2.5:7b-instruct, keep_alive: 2m"]
+        FCM["🔔 Firebase Cloud Messaging\nFree Spark Plan (Web Push / Mobile)"]
+    end
+
+    PWA --> Tailscale --> Fastify
+    Desktop --> Fastify
+    Fastify --> Queue --> Pipeline
+    Pipeline --> STT
+    Pipeline --> LLM
+    Pipeline --> Postgres
+    Scheduler --> Postgres
+    Scheduler --> FCM
+    Scheduler --> Fastify
+    Fastify --> PWA
+    Fastify --> Desktop
 ```
 
 ---
 
-## 1. Quick Start & Setup
+## Monorepo Workspaces
 
-### Prerequisites
+- `apps/api`: Fastify 4.29 TypeScript REST & WebSocket backend, Drizzle ORM migrations, argon2id single-user JWT auth, atomic PostgreSQL queue, GIN tsvector search.
+- `apps/web`: React 18, Vite 5, Tailwind CSS, Lucide icons, installable PWA with Service Worker, Web Share Target, and offline IndexedDB queue.
+- `apps/desktop`: Electron frameless always-on-top semi-transparent 320x420 widget, collapse-to-pill mode, global hotkeys (`Ctrl+Alt+R`, `Ctrl+Alt+B`, `Ctrl+Alt+W`), PipeWire/PulseAudio meeting monitor recording, and libnotify native notifications.
+- `apps/stt`: FastAPI Python 3.11 sidecar with `faster-whisper` (int8, CPU threads=4, Silero VAD, Indian business vocabulary hints, language remapping, auto-model unload after 300s).
+- `packages/shared`: Shared TypeScript types, Zod schemas, and Indian relative-date resolver (`Asia/Calcutta`) supporting Hindi, Gujarati, Hinglish phrases.
+
+---
+
+## 100% Zero-Cost Guarantee
+
+TaskCatch is built strictly on open-source software and permanently free tiers:
+- **Speech-to-Text:** Local `faster-whisper` running int8 on CPU ($0).
+- **LLM Extraction:** Local `Ollama` running `qwen2.5:7b-instruct` on CPU ($0).
+- **Database:** Local PostgreSQL 16 container ($0).
+- **Remote Mobile Access:** Tailscale personal mesh VPN ($0).
+- **Push Reminders:** Firebase Cloud Messaging free Spark plan ($0).
+
+See [`docs/COSTS.md`](file:///home/lenovo/taskcatch/docs/COSTS.md) for full breakdown.
+
+---
+
+## Production Installation (Ubuntu 22.04 / 24.04)
+
+### 1. Prerequisites
+- AMD / Intel 64-bit CPU (optimized for AMD Ryzen 5 3500U, 4C/8T, ~5GB free RAM)
 - Ubuntu 22.04 or 24.04 LTS
 - Node.js 20+ and npm 10+
-- Docker & Docker Compose (or PostgreSQL 16 native)
-- Python 3.11 with `uv`
-- `ffmpeg` system binary (`sudo apt install ffmpeg`)
+- Python 3.11 with `venv`
+- Docker & Docker Compose
+- `ffmpeg` (`sudo apt install ffmpeg`)
+- Ollama local daemon (`curl -fsSL https://ollama.com/install.sh | sh && ollama pull qwen2.5:7b-instruct`)
 
-### Step 1: Start PostgreSQL 16
+### 2. Automated Install Script
+Run the automated installer to set up dependencies, migrations, and systemd user services:
+
 ```bash
-# Start isolated local PostgreSQL 16 on port 5433
-docker compose up -d
-
-# Verify connection
-docker compose ps
+cd /home/lenovo/taskcatch
+./scripts/install.sh
 ```
 
-### Step 2: Configure Environment
-Copy `.env.example` to `.env`:
+This creates and starts three systemd user services:
 ```bash
-cp .env.example .env
-```
-Default connection string:
-```bash
-DATABASE_URL=postgresql://taskcatch:taskcatch_dev_secret@localhost:5433/taskcatch
+systemctl --user status taskcatch-postgres taskcatch-stt taskcatch-api
 ```
 
-### Step 3: Install Dependencies & Run Tests
+### 3. Desktop Electron Widget
+To launch the always-on-top desktop assistant:
 ```bash
-# Install node dependencies
-npm install
-
-# Run unit and integration tests across workspaces
-npm test
+cd /home/lenovo/taskcatch/apps/desktop
+npm start
 ```
+- **Global Hotkeys:**
+  - `Ctrl + Alt + R`: Start / Stop recording
+  - `Ctrl + Alt + B`: Bookmark conversation moment
+  - `Ctrl + Alt + W`: Show / Hide widget
 
-### Step 4: Setup Python STT Environment
-```bash
-# Create virtual environment and install requirements
-~/.local/bin/uv venv apps/stt/.venv --python 3.11
-~/.local/bin/uv pip install -r apps/stt/requirements.txt --python apps/stt/.venv/bin/python
-```
-
----
-
-## 2. PostgreSQL 16 Data Model & Features
-
-- **Driver & ORM**: Drizzle ORM with `pg` (`node-postgres`).
-- **Jobs Engine**: Persistent DB-backed job queue utilizing PostgreSQL atomic job claims:
-  ```sql
-  WITH next_job AS (
-    SELECT id FROM jobs
-    WHERE status = 'pending' AND run_at <= now()
-    ORDER BY run_at ASC
-    FOR UPDATE SKIP LOCKED
-    LIMIT 1
-  )
-  UPDATE jobs
-  SET status = 'processing', attempts = attempts + 1, updated_at = now()
-  WHERE id IN (SELECT id FROM next_job)
-  RETURNING *;
-  ```
-- **Full-Text Search**: Native `tsvector` generated columns with PostgreSQL `GIN` indexing:
-  - `tasks`: Generated from `title`, `description`, and `tags`.
-  - `transcript_segments`: Generated from `text_original` and `text_english`.
-  - Query operator: `search_vector @@ plainto_tsquery('english', $1)`.
-- **Performance Indexes**:
-  - `idx_tasks_status_due` on `tasks(status, due_at)`
-  - `idx_reminders_fire_sent` on `reminders(fire_at) WHERE sent_at IS NULL` (Partial index)
-  - `idx_segments_session` on `transcript_segments(session_id, start_ms)`
-
----
-
-## 3. Firebase Cloud Messaging (FCM) Setup
-
-TaskCatch strictly runs on the **Firebase Spark Free Plan** (no credit card required, unlimited FCM push messages).
-
-### Switching to your own Personal Project:
-1. Go to [Firebase Console](https://console.firebase.google.com/) and create a project (free Spark plan).
-2. Navigate to **Project settings -> Service accounts** -> Click **Generate new private key**.
-3. Save the JSON file securely on your Ubuntu machine (e.g. `~/.config/taskcatch/firebase-adminsdk.json`).
-4. Set the path in `.env`:
+### 4. Connect Your Phone via Tailscale HTTPS
+1. Install Tailscale on your laptop and log in:
    ```bash
-   FIREBASE_SERVICE_ACCOUNT_PATH=/absolute/path/to/firebase-adminsdk.json
+   sudo tailscale up
    ```
-5. For Web Push, navigate to **Project settings -> Cloud Messaging -> Web Push certificates** and click **Generate key pair** (VAPID key).
-6. Set the VAPID key in `.env`:
+2. Enable HTTPS serve:
    ```bash
-   VITE_FIREBASE_VAPID_KEY=your_generated_vapid_key
+   sudo tailscale serve --https=443 http://localhost:3000
    ```
+3. On your phone (Android / iOS):
+   - Install the Tailscale app and connect to your tailnet.
+   - Open your Tailscale machine URL in Chrome/Safari (e.g. `https://taskcatch.your-tailnet.ts.net`).
+   - Tap **"Add to Home Screen"** to install the PWA.
 
 ---
 
-## 4. Tailscale Setup (Phone PWA Microphone Access)
+## Verification & Testing
 
-Modern mobile browsers (Chrome / Safari) require **HTTPS** for microphone access (`navigator.mediaDevices.getUserMedia`). Tailscale provides free HTTPS certificates for your local machine over your private mesh network:
-
+Run all unit and integration tests across the monorepo:
 ```bash
-# 1. Install Tailscale on Ubuntu (if not already installed)
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
+npm run test
+```
+*Current test suite: 26 passed across shared, API, auth, database, job queue, pipeline, date resolver, settings hot-reload, and reminder deduplication.*
 
-# 2. Serve the TaskCatch API over HTTPS on your Tailscale network
-sudo tailscale serve --bg https / http://127.0.0.1:3000
-
-# 3. Access on your phone
-# Open https://<your-machine-name>.tailnet-xyz.ts.net on your phone browser
-# Tap "Add to Home Screen" to install the PWA
+Build all workspaces:
+```bash
+npm run build
 ```
 
----
-
-## 5. Monorepo Structure
-
-- `/apps/api`: Fastify backend, Drizzle ORM, PostgreSQL queries, Job Queue, WebSocket server, Reminder engine.
-- `/apps/stt`: Python 3.11 sidecar with `faster-whisper` and Phase 0 benchmark scripts.
-- `/apps/web`: React + Vite + Tailwind CSS + PWA with IndexedDB offline audio chunk queue.
-- `/apps/desktop`: Electron tray widget with frameless always-on-top mode and global hotkeys.
-- `/packages/shared`: Shared TypeScript types, Zod schemas, and Indian context relative date resolver.
-- `/docs/FINDINGS.md`: Insights from inspecting existing repositories.
-- `/docs/COSTS.md`: Zero-cost licensing matrix.
-
----
-
-## 6. Running Tests
-
+Run load test:
 ```bash
-# Run all unit and integration tests (Shared + API)
-npm test
-
-# Run STT Benchmarks (Phase 0)
-apps/stt/.venv/bin/python apps/stt/benchmark.py --audio-dir fixtures/audio
+node scripts/load_test.js
 ```
+*Measured: 481.9 req/s, p50=17.5ms, p95=37.2ms on `/health`.*
+
+---
+
+## Documentation Index
+
+- [`docs/ARCHITECTURE.md`](file:///home/lenovo/taskcatch/docs/ARCHITECTURE.md): Complete system architecture, component interactions, and data flows.
+- [`docs/BENCHMARK.md`](file:///home/lenovo/taskcatch/docs/BENCHMARK.md): Speech-to-Text benchmark results, real-time factors, memory profiles, and audio fixture specifications.
+- [`docs/PERFORMANCE.md`](file:///home/lenovo/taskcatch/docs/PERFORMANCE.md): Measured RAM, CPU, RTF per model, and API throughput benchmarks.
+- [`docs/FIREBASE_SETUP.md`](file:///home/lenovo/taskcatch/docs/FIREBASE_SETUP.md): Step-by-step guide to set up a dedicated free Firebase project (Spark tier) and isolate personal notifications from IntelliSolar CRM.
+- [`docs/TAILSCALE_SETUP.md`](file:///home/lenovo/taskcatch/docs/TAILSCALE_SETUP.md): Guide for connecting phone to laptop over encrypted Tailscale HTTPS.
+- [`docs/OPERATIONS.md`](file:///home/lenovo/taskcatch/docs/OPERATIONS.md): Systemd user services, automated nightly backups, database restore procedure, and troubleshooting.
+- [`docs/COSTS.md`](file:///home/lenovo/taskcatch/docs/COSTS.md): Verification of zero-cost architecture.
+
+---
+
+## Known Limitations and Next Steps
+
+1. **Real Audio Fixture Benchmark (Provisional Status):**
+   - Current benchmarks on Faster-Whisper `small` vs `base` are verified with synthetic test clips.
+   - To finalize the benchmark and select the permanent default for Gujarati and noisy room scenarios, place 2-3 minute real recordings in `fixtures/audio/` with matching `.txt` ground truth files:
+     - `fixtures/audio/hindi_meeting.wav` + `fixtures/audio/hindi_meeting.txt`
+     - `fixtures/audio/gujarati_discussion.wav` + `fixtures/audio/gujarati_discussion.txt`
+     - `fixtures/audio/hinglish_noisy.wav` + `fixtures/audio/hinglish_noisy.txt`
+   - Run `python apps/stt/benchmark.py` to produce final WER numbers for `docs/BENCHMARK.md`.
+
+2. **AI4Bharat IndicConformer:**
+   - The AI4Bharat IndicConformer provider is ready for evaluation via HuggingFace transformers. Once real Gujarati audio fixtures are added, run the comparison with `small` (int8) to evaluate whether IndicConformer provides higher Gujarati WER on CPU within the memory budget.

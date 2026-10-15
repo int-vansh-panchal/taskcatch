@@ -47,6 +47,22 @@ describe("resolveIndianRelativeDate", () => {
     expect(date.getHours()).toBe(14);
   });
 
+  it("resolves Gujarati 'કાલે સાંજે' (tomorrow evening)", () => {
+    const result = resolveIndianRelativeDate("કાલે સાંજે ક્લાયન્ટ કોલ છે", { baseDate });
+    expect(result).not.toBeNull();
+    const date = new Date(result!);
+    expect(date.getDate()).toBe(baseDate.getDate() + 1);
+    expect(date.getHours()).toBe(18);
+  });
+
+  it("resolves Gujarati script weekday 'આવતા શુક્રવારે' (next Friday)", () => {
+    // Base Oct 15, 2026 is Thursday (4). Next Friday is Oct 23, 2026 (or next day Oct 16 with 'aavta' adding 7 -> Oct 23).
+    const result = resolveIndianRelativeDate("આવતા શુક્રવારે કામ પૂરું કરવું", { baseDate });
+    expect(result).not.toBeNull();
+    const date = new Date(result!);
+    expect(date.getDay()).toBe(5); // Friday
+  });
+
   it("returns null for non-relative or empty text", () => {
     expect(resolveIndianRelativeDate(null, { baseDate })).toBeNull();
     expect(resolveIndianRelativeDate("", { baseDate })).toBeNull();

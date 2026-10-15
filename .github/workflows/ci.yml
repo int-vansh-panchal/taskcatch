@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-build:
+    name: Build & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build All Workspaces
+        run: npm run build
+
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: taskcatch
+          POSTGRES_USER: taskcatch
+          POSTGRES_PASSWORD: taskcatch_dev_secret
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Setup Environment
+        run: |
+          cp .env.example .env
+          echo "DATABASE_URL=postgresql://taskcatch:taskcatch_dev_secret@localhost:5433/taskcatch" >> .env
+          echo "COOKIE_SECRET=taskcatch_ci_testing_cookie_secret_32_chars_min" >> .env
+
+      - name: Run Drizzle Migrations
+        run: npm run db:migrate --workspace=@taskcatch/api
+        env:
+          DATABASE_URL: postgresql://taskcatch:taskcatch_dev_secret@localhost:5433/taskcatch
+
+      - name: Run Vitest Suite
+        run: npm run test
+        env:
+          DATABASE_URL: postgresql://taskcatch:taskcatch_dev_secret@localhost:5433/taskcatch
+          COOKIE_SECRET: taskcatch_ci_testing_cookie_secret_32_chars_min

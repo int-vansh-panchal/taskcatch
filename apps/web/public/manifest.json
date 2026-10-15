@@ -1,0 +1,31 @@
+{
+  "name": "TaskCatch",
+  "short_name": "TaskCatch",
+  "description": "Capture verbal instructions in Hindi, Gujarati, Hinglish and English. Automatically extracts structured tasks and reminders.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/import",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "audio",
+          "accept": ["audio/*", ".m4a", ".mp3", ".wav", ".ogg", ".webm"]
+        }
+      ]
+    }
+  }
+}

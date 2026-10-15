@@ -1,0 +1,22 @@
+[Unit]
+Description=TaskCatch Faster-Whisper Speech Sidecar
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/taskcatch/apps/stt
+ExecStart=%h/taskcatch/apps/stt/.venv/bin/python server.py
+Restart=always
+RestartSec=5s
+Environment=PYTHONUNBUFFERED=1
+Environment=PORT=8000
+Environment=WHISPER_MODEL=small
+Environment=WHISPER_DEVICE=cpu
+Environment=WHISPER_COMPUTE_TYPE=int8
+Environment=WHISPER_CPU_THREADS=4
+MemoryMax=1500M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

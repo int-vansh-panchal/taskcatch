@@ -1,0 +1,38 @@
+{
+  "name": "@taskcatch/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsc && electron .",
+    "pack": "tsc && electron-builder --dir",
+    "dist": "tsc && electron-builder --linux deb AppImage"
+  },
+  "build": {
+    "appId": "com.taskcatch.desktop",
+    "productName": "TaskCatch",
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Office"
+    },
+    "files": [
+      "dist/**/*",
+      "src/renderer/**/*",
+      "assets/**/*"
+    ]
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/ws": "^8.5.12",
+    "electron": "^31.4.0",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.5.4"
+  }
+}

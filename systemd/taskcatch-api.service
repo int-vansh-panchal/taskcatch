@@ -1,0 +1,20 @@
+[Unit]
+Description=TaskCatch Fastify API Service
+After=network.target taskcatch-postgres.service
+Wants=taskcatch-postgres.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/taskcatch/apps/api
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5s
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DATABASE_URL=postgresql://taskcatch:taskcatch_dev_secret@localhost:5433/taskcatch
+MemoryMax=512M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="128" fill="#4f46e5"/>
+  <circle cx="256" cy="256" r="160" fill="#4338ca" stroke="#818cf8" stroke-width="12"/>
+  <!-- Microphone & Checkmark icon -->
+  <rect x="226" y="140" width="60" height="130" rx="30" fill="#ffffff"/>
+  <path d="M176 220C176 264.183 211.817 300 256 300C300.183 300 336 264.183 336 220" stroke="#ffffff" stroke-width="24" stroke-linecap="round"/>
+  <line x1="256" y1="300" x2="256" y2="350" stroke="#ffffff" stroke-width="24" stroke-linecap="round"/>
+  <line x1="206" y1="350" x2="306" y2="350" stroke="#ffffff" stroke-width="24" stroke-linecap="round"/>
+  <!-- Checkmark badge in bottom corner -->
+  <circle cx="360" cy="360" r="64" fill="#10b981" stroke="#ffffff" stroke-width="12"/>
+  <path d="M336 360L352 376L384 344" stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
