@@ -152,7 +152,7 @@ export async function buildApp() {
         return reply.status(404).send({ error: "Route not found" });
       }
       // Single Page Application fallback for client-side routing
-      return reply.sendFile("index.html");
+      return (reply as any).sendFile("index.html");
     });
   }
 
