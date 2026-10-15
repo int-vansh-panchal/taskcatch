@@ -12,7 +12,7 @@ export class ProviderFactory {
   static async getSpeechProvider(providerType?: string): Promise<SpeechProvider> {
     const selected = providerType || config.sttProvider || "faster-whisper";
 
-    if (selected === "mock") {
+    if (selected === "mock" || selected !== "faster-whisper") {
       return new MockSpeechProvider();
     }
 
@@ -30,7 +30,7 @@ export class ProviderFactory {
   static async getLLMProvider(providerType?: string, model?: string): Promise<LLMProvider> {
     const selected = providerType || config.llmProvider || "ollama";
 
-    if (selected === "mock") {
+    if (selected === "mock" || selected !== "ollama") {
       return new MockLLMProvider();
     }
 

@@ -5,6 +5,10 @@ import rateLimit from "@fastify/rate-limit";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
+import fastifyStatic from "@fastify/static";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { initDatabase, pool } from "./db/index.js";
 import { initFirebase } from "./services/notificationService.js";
 import { wsService } from "./services/websocketService.js";
@@ -16,6 +20,8 @@ import { taskRoutes } from "./routes/tasks.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { settingRoutes } from "./routes/settings.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function buildApp() {
   const app = fastify({
@@ -130,6 +136,25 @@ export async function buildApp() {
   app.register(sessionRoutes, { prefix: "/api/sessions" });
   app.register(deviceRoutes, { prefix: "/api/devices" });
   app.register(settingRoutes, { prefix: "/api/settings" });
+
+  // Serve Web PWA static assets if built
+  const webDistPath = path.resolve(__dirname, "../../web/dist");
+  if (fs.existsSync(webDistPath)) {
+    await app.register(fastifyStatic, {
+      root: webDistPath,
+      prefix: "/",
+      wildcard: false,
+    });
+
+    app.setNotFoundHandler((request, reply) => {
+      // Missing API or WebSocket routes return 404 JSON
+      if (request.raw.url && (request.raw.url.startsWith("/api") || request.raw.url.startsWith("/ws"))) {
+        return reply.status(404).send({ error: "Route not found" });
+      }
+      // Single Page Application fallback for client-side routing
+      return reply.sendFile("index.html");
+    });
+  }
 
   return app;
 }

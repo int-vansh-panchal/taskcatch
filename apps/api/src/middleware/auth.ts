@@ -12,17 +12,20 @@ declare module "fastify" {
 }
 
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply) {
-  // Public auth and health routes bypass authentication
   const path = request.url;
+
+  // Non-API routes (static frontend assets, PWA manifest, service workers, HTML root, web sockets, health probes) bypass auth
+  if (!path.startsWith("/api")) {
+    return;
+  }
+
+  // Public API endpoints that don't need auth
   if (
-    path.startsWith("/health") ||
-    path.startsWith("/ready") ||
     path.startsWith("/api/auth/status") ||
     path.startsWith("/api/auth/login") ||
     path.startsWith("/api/auth/register") ||
     path.startsWith("/api/auth/refresh") ||
-    path.startsWith("/api/audio/stream") ||
-    path.startsWith("/ws")
+    path.startsWith("/api/audio/stream")
   ) {
     return;
   }
