@@ -15,13 +15,14 @@ command -v python3 >/dev/null 2>&1 || { echo "❌ Python 3.11+ is required."; ex
 command -v ffmpeg >/dev/null 2>&1 || { echo "❌ ffmpeg is required for audio normalization."; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "❌ Docker is required for PostgreSQL 16."; exit 1; }
 
-echo "✓ System dependencies found."
+NODE_BIN=$(which node)
+DOCKER_BIN=$(which docker)
+echo "✓ System dependencies found (Node: $NODE_BIN, Docker: $DOCKER_BIN)."
 
 # 1. Environment file setup
 if [ ! -f .env ]; then
   echo "➜ Generating .env from .env.example..."
   cp .env.example .env
-  # Generate random cookie secret
   COOKIE_HEX=$(openssl rand -hex 24 2>/dev/null || date +%s%N | sha256sum | head -c 48)
   sed -i "s/COOKIE_SECRET=.*/COOKIE_SECRET=taskcatch_secret_${COOKIE_HEX}/" .env
   echo "✓ .env created."
@@ -36,12 +37,21 @@ npm run build
 
 # 3. Python STT virtualenv setup
 echo "➜ Setting up Python virtual environment for faster-whisper sidecar..."
-if [ ! -d "apps/stt/.venv" ]; then
-  python3 -m venv apps/stt/.venv
-fi
-apps/stt/.venv/bin/pip install --upgrade pip
-if [ -f apps/stt/requirements.txt ]; then
-  apps/stt/.venv/bin/pip install -r apps/stt/requirements.txt
+if command -v uv >/dev/null 2>&1; then
+  if [ ! -d "apps/stt/.venv" ]; then
+    uv venv apps/stt/.venv --python 3.11
+  fi
+  if [ -f apps/stt/requirements.txt ]; then
+    uv pip install --python apps/stt/.venv/bin/python -r apps/stt/requirements.txt
+  fi
+else
+  if [ ! -d "apps/stt/.venv" ]; then
+    python3 -m venv apps/stt/.venv
+  fi
+  if [ -f "apps/stt/.venv/bin/pip" ] && [ -f apps/stt/requirements.txt ]; then
+    apps/stt/.venv/bin/pip install --upgrade pip
+    apps/stt/.venv/bin/pip install -r apps/stt/requirements.txt
+  fi
 fi
 echo "✓ Python sidecar environment ready."
 
@@ -66,9 +76,10 @@ echo "➜ Installing systemd user units..."
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 mkdir -p "$SYSTEMD_USER_DIR"
 
-cp systemd/taskcatch-api.service "$SYSTEMD_USER_DIR/"
+# Substitute exact node path for systemd user service
+sed "s|ExecStart=/usr/bin/node|ExecStart=$NODE_BIN|" systemd/taskcatch-api.service > "$SYSTEMD_USER_DIR/taskcatch-api.service"
 cp systemd/taskcatch-stt.service "$SYSTEMD_USER_DIR/"
-cp systemd/taskcatch-postgres.service "$SYSTEMD_USER_DIR/"
+sed "s|/usr/bin/docker|$DOCKER_BIN|" systemd/taskcatch-postgres.service > "$SYSTEMD_USER_DIR/taskcatch-postgres.service"
 
 systemctl --user daemon-reload
 systemctl --user enable taskcatch-postgres taskcatch-stt taskcatch-api

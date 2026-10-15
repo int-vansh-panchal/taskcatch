@@ -1,7 +1,6 @@
 [Unit]
 Description=TaskCatch PostgreSQL 16 Container
-After=docker.service
-Requires=docker.service
+After=network.target
 
 [Service]
 Type=oneshot
