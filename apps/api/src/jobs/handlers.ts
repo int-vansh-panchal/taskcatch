@@ -13,7 +13,7 @@ export function registerJobHandlers() {
   // 2. Check Reminders Job
   jobQueue.registerWorker("check_reminders", async () => {
     const nowIso = new Date().toISOString();
-    const pending = dbQueries.getPendingReminders(nowIso);
+    const pending = await dbQueries.getPendingReminders(nowIso);
 
     for (const item of pending) {
       try {
@@ -37,10 +37,10 @@ export function registerJobHandlers() {
         });
 
         // Mark sent
-        dbQueries.markReminderSent(item.id);
+        await dbQueries.markReminderSent(item.id);
       } catch (err) {
         console.error(`[Reminder] Failed to send reminder ${item.id}:`, err);
-        dbQueries.markReminderFailed(item.id);
+        await dbQueries.markReminderFailed(item.id);
       }
     }
   });

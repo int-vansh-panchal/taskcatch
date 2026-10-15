@@ -1,4 +1,4 @@
-import { sqlite } from "./index.js";
+import { pool } from "./index.js";
 import type {
   Task,
   Session,
@@ -8,88 +8,144 @@ import type {
   Reminder,
   Note,
   Job,
-  UserSettings,
 } from "@taskcatch/shared";
 import crypto from "node:crypto";
 
+function toIso(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) return val.toISOString();
+  if (typeof val === "string") {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? val : d.toISOString();
+  }
+  return new Date(val).toISOString();
+}
+
+function toTask(row: any): Task {
+  return {
+    ...row,
+    tags: typeof row.tags === "string" ? JSON.parse(row.tags) : row.tags || [],
+    due_at: toIso(row.due_at),
+    snoozed_until: toIso(row.snoozed_until),
+    created_at: toIso(row.created_at) || new Date().toISOString(),
+    updated_at: toIso(row.updated_at) || new Date().toISOString(),
+  };
+}
+
+function toReminder(r: any): Reminder {
+  return {
+    ...r,
+    fire_at: toIso(r.fire_at) || new Date().toISOString(),
+    sent_at: toIso(r.sent_at),
+    created_at: toIso(r.created_at) || new Date().toISOString(),
+  };
+}
+
+function toJob(r: any): Job {
+  return {
+    ...r,
+    payload: typeof r.payload === "string" ? r.payload : JSON.stringify(r.payload),
+    run_at: toIso(r.run_at) || new Date().toISOString(),
+    created_at: toIso(r.created_at) || new Date().toISOString(),
+    updated_at: toIso(r.updated_at) || new Date().toISOString(),
+  };
+}
+
+function toSession(row: any): Session {
+  return {
+    ...row,
+    created_at: toIso(row.created_at) || new Date().toISOString(),
+    updated_at: toIso(row.updated_at) || new Date().toISOString(),
+  };
+}
+
 export const dbQueries = {
   // ── Sessions ───────────────────────────────────────────────────────────────
-  createSession(data: {
+  async createSession(data: {
     id?: string;
     userId: string;
     deviceId: string;
     audioPath?: string | null;
     status: Session["status"];
     languageDetected?: string | null;
-  }): Session {
+  }): Promise<Session> {
     const id = data.id || `sess_${crypto.randomUUID()}`;
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       INSERT INTO sessions (id, user_id, device_id, audio_path, status, language_detected)
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
-    `);
-    const row = stmt.get(
-      id,
-      data.userId,
-      data.deviceId,
-      data.audioPath || null,
-      data.status,
-      data.languageDetected || null
-    ) as any;
-    return row;
+      `,
+      [
+        id,
+        data.userId,
+        data.deviceId,
+        data.audioPath || null,
+        data.status,
+        data.languageDetected || null,
+      ]
+    );
+    return toSession(res.rows[0]);
   },
 
-  getSession(id: string): Session | null {
-    const stmt = sqlite.prepare(`SELECT * FROM sessions WHERE id = ?`);
-    return (stmt.get(id) as Session) || null;
+  async getSession(id: string): Promise<Session | null> {
+    const res = await pool.query(`SELECT * FROM sessions WHERE id = $1`, [id]);
+    return res.rows[0] ? toSession(res.rows[0]) : null;
   },
 
-  updateSession(
+  async updateSession(
     id: string,
-    updates: Partial<Pick<Session, "status" | "audio_path" | "duration_sec" | "summary" | "language_detected">>
-  ): Session | null {
-    const setClauses: string[] = ["updated_at = datetime('now')"];
+    updates: Partial<
+      Pick<Session, "status" | "audio_path" | "duration_sec" | "summary" | "language_detected">
+    >
+  ): Promise<Session | null> {
+    const setClauses: string[] = ["updated_at = now()"];
     const values: any[] = [];
+    let idx = 1;
 
     if (updates.status !== undefined) {
-      setClauses.push("status = ?");
+      setClauses.push(`status = $${idx++}`);
       values.push(updates.status);
     }
     if (updates.audio_path !== undefined) {
-      setClauses.push("audio_path = ?");
+      setClauses.push(`audio_path = $${idx++}`);
       values.push(updates.audio_path);
     }
     if (updates.duration_sec !== undefined) {
-      setClauses.push("duration_sec = ?");
+      setClauses.push(`duration_sec = $${idx++}`);
       values.push(updates.duration_sec);
     }
     if (updates.summary !== undefined) {
-      setClauses.push("summary = ?");
+      setClauses.push(`summary = $${idx++}`);
       values.push(updates.summary);
     }
     if (updates.language_detected !== undefined) {
-      setClauses.push("language_detected = ?");
+      setClauses.push(`language_detected = $${idx++}`);
       values.push(updates.language_detected);
     }
 
     values.push(id);
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       UPDATE sessions SET ${setClauses.join(", ")}
-      WHERE id = ?
+      WHERE id = $${idx}
       RETURNING *
-    `);
-    return (stmt.get(...values) as Session) || null;
+      `,
+      values
+    );
+    return res.rows[0] ? toSession(res.rows[0]) : null;
   },
 
-  listSessions(userId: string, limit = 50, offset = 0): Session[] {
-    const stmt = sqlite.prepare(`
-      SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
-    `);
-    return stmt.all(userId, limit, offset) as Session[];
+  async listSessions(userId: string, limit = 50, offset = 0): Promise<Session[]> {
+    const res = await pool.query(
+      `SELECT * FROM sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    );
+    return res.rows.map(toSession);
   },
 
   // ── Transcript Segments ────────────────────────────────────────────────────
-  insertSegments(
+  async insertSegments(
     sessionId: string,
     segments: Array<{
       start_ms: number;
@@ -98,55 +154,79 @@ export const dbQueries = {
       text_original: string;
       text_english: string;
     }>
-  ) {
-    const stmt = sqlite.prepare(`
-      INSERT INTO transcript_segments (id, session_id, segment_index, start_ms, end_ms, speaker, text_original, text_english)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertMany = sqlite.transaction((items) => {
-      items.forEach((item: any, idx: number) => {
-        stmt.run(
-          `seg_${crypto.randomUUID()}`,
-          sessionId,
-          idx,
-          item.start_ms,
-          item.end_ms,
-          item.speaker || "Speaker 1",
-          item.text_original,
-          item.text_english
+  ): Promise<void> {
+    if (!segments.length) return;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (let idx = 0; idx < segments.length; idx++) {
+        const item = segments[idx];
+        await client.query(
+          `
+          INSERT INTO transcript_segments (
+            id, session_id, segment_index, start_ms, end_ms, speaker, text_original, text_english
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          `,
+          [
+            `seg_${crypto.randomUUID()}`,
+            sessionId,
+            idx,
+            item.start_ms,
+            item.end_ms,
+            item.speaker || "Speaker 1",
+            item.text_original,
+            item.text_english,
+          ]
         );
-      });
-    });
-    insertMany(segments);
+      }
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
   },
 
-  getSegments(sessionId: string): TranscriptSegment[] {
-    const stmt = sqlite.prepare(`
-      SELECT * FROM transcript_segments WHERE session_id = ? ORDER BY segment_index ASC
-    `);
-    return stmt.all(sessionId) as TranscriptSegment[];
+  async getSegments(sessionId: string): Promise<TranscriptSegment[]> {
+    const res = await pool.query(
+      `SELECT * FROM transcript_segments WHERE session_id = $1 ORDER BY segment_index ASC`,
+      [sessionId]
+    );
+    return res.rows;
   },
 
   // ── Bookmarks ──────────────────────────────────────────────────────────────
-  addBookmark(sessionId: string, timestampMs: number, label?: string | null): Bookmark {
+  async addBookmark(sessionId: string, timestampMs: number, label?: string | null): Promise<Bookmark> {
     const id = `bm_${crypto.randomUUID()}`;
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       INSERT INTO bookmarks (id, session_id, timestamp_ms, label)
-      VALUES (?, ?, ?, ?)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
-    `);
-    return stmt.get(id, sessionId, timestampMs, label || null) as Bookmark;
+      `,
+      [id, sessionId, timestampMs, label || null]
+    );
+    const r = res.rows[0];
+    return {
+      ...r,
+      created_at: toIso(r.created_at) || new Date().toISOString(),
+    };
   },
 
-  getBookmarks(sessionId: string): Bookmark[] {
-    const stmt = sqlite.prepare(`
-      SELECT * FROM bookmarks WHERE session_id = ? ORDER BY timestamp_ms ASC
-    `);
-    return stmt.all(sessionId) as Bookmark[];
+  async getBookmarks(sessionId: string): Promise<Bookmark[]> {
+    const res = await pool.query(
+      `SELECT * FROM bookmarks WHERE session_id = $1 ORDER BY timestamp_ms ASC`,
+      [sessionId]
+    );
+    return res.rows.map((r) => ({
+      ...r,
+      created_at: toIso(r.created_at) || new Date().toISOString(),
+    }));
   },
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
-  createTask(data: {
+  async createTask(data: {
     userId: string;
     sessionId?: string | null;
     title: string;
@@ -163,212 +243,215 @@ export const dbQueries = {
     confidence?: number;
     needsClarification?: boolean;
     clarificationQuestion?: string | null;
-  }): Task {
+  }): Promise<Task> {
     const id = `task_${crypto.randomUUID()}`;
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       INSERT INTO tasks (
         id, user_id, session_id, title, description, requested_by, due_at,
         priority, status, tags, source_quote_original, source_quote_english,
         start_ms, end_ms, confidence, needs_clarification, clarification_question
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *
-    `);
+      `,
+      [
+        id,
+        data.userId,
+        data.sessionId || null,
+        data.title,
+        data.description,
+        data.requestedBy || null,
+        data.dueAt ? new Date(data.dueAt) : null,
+        data.priority || "med",
+        data.status || "needs_review",
+        JSON.stringify(data.tags || []),
+        data.sourceQuoteOriginal || "",
+        data.sourceQuoteEnglish || "",
+        data.startMs || 0,
+        data.endMs || 0,
+        data.confidence ?? 0.8,
+        data.needsClarification ? true : false,
+        data.clarificationQuestion || null,
+      ]
+    );
 
-    const row = stmt.get(
-      id,
-      data.userId,
-      data.sessionId || null,
-      data.title,
-      data.description,
-      data.requestedBy || null,
-      data.dueAt || null,
-      data.priority || "med",
-      data.status || "needs_review",
-      JSON.stringify(data.tags || []),
-      data.sourceQuoteOriginal || "",
-      data.sourceQuoteEnglish || "",
-      data.startMs || 0,
-      data.endMs || 0,
-      data.confidence ?? 0.8,
-      data.needsClarification ? 1 : 0,
-      data.clarificationQuestion || null
-    ) as any;
-
-    return {
-      ...row,
-      tags: JSON.parse(row.tags || "[]"),
-      needs_clarification: Boolean(row.needs_clarification),
-    };
+    return toTask(res.rows[0]);
   },
 
-  getTask(id: string): Task | null {
-    const stmt = sqlite.prepare(`SELECT * FROM tasks WHERE id = ?`);
-    const row = stmt.get(id) as any;
-    if (!row) return null;
-    return {
-      ...row,
-      tags: JSON.parse(row.tags || "[]"),
-      needs_clarification: Boolean(row.needs_clarification),
-    };
+  async getTask(id: string): Promise<Task | null> {
+    const res = await pool.query(`SELECT * FROM tasks WHERE id = $1`, [id]);
+    const row = res.rows[0];
+    return row ? toTask(row) : null;
   },
 
-  listTasks(filters: {
+  async listTasks(filters: {
     userId: string;
     status?: Task["status"];
     sessionId?: string;
     limit?: number;
-  }): Task[] {
-    const conditions = ["user_id = ?"];
+  }): Promise<Task[]> {
+    const conditions = ["user_id = $1"];
     const params: any[] = [filters.userId];
+    let idx = 2;
 
     if (filters.status) {
-      conditions.push("status = ?");
+      conditions.push(`status = $${idx++}`);
       params.push(filters.status);
     }
     if (filters.sessionId) {
-      conditions.push("session_id = ?");
+      conditions.push(`session_id = $${idx++}`);
       params.push(filters.sessionId);
     }
 
     const limit = filters.limit || 100;
     params.push(limit);
 
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       SELECT * FROM tasks
       WHERE ${conditions.join(" AND ")}
       ORDER BY due_at ASC NULLS LAST, created_at DESC
-      LIMIT ?
-    `);
+      LIMIT $${idx}
+      `,
+      params
+    );
 
-    return stmt.all(...params).map((row: any) => ({
-      ...row,
-      tags: JSON.parse(row.tags || "[]"),
-      needs_clarification: Boolean(row.needs_clarification),
-    }));
+    return res.rows.map(toTask);
   },
 
-  updateTask(
+  async updateTask(
     id: string,
-    updates: Partial<Pick<Task, "title" | "description" | "status" | "priority" | "due_at" | "tags" | "snoozed_until" | "needs_clarification" | "clarification_question">>
-  ): Task | null {
-    const setClauses: string[] = ["updated_at = datetime('now')"];
+    updates: Partial<
+      Pick<
+        Task,
+        | "title"
+        | "description"
+        | "status"
+        | "priority"
+        | "due_at"
+        | "tags"
+        | "snoozed_until"
+        | "needs_clarification"
+        | "clarification_question"
+      >
+    >
+  ): Promise<Task | null> {
+    const setClauses: string[] = ["updated_at = now()"];
     const values: any[] = [];
+    let idx = 1;
 
     if (updates.title !== undefined) {
-      setClauses.push("title = ?");
+      setClauses.push(`title = $${idx++}`);
       values.push(updates.title);
     }
     if (updates.description !== undefined) {
-      setClauses.push("description = ?");
+      setClauses.push(`description = $${idx++}`);
       values.push(updates.description);
     }
     if (updates.status !== undefined) {
-      setClauses.push("status = ?");
+      setClauses.push(`status = $${idx++}`);
       values.push(updates.status);
     }
     if (updates.priority !== undefined) {
-      setClauses.push("priority = ?");
+      setClauses.push(`priority = $${idx++}`);
       values.push(updates.priority);
     }
     if (updates.due_at !== undefined) {
-      setClauses.push("due_at = ?");
-      values.push(updates.due_at);
+      setClauses.push(`due_at = $${idx++}`);
+      values.push(updates.due_at ? new Date(updates.due_at) : null);
     }
     if (updates.tags !== undefined) {
-      setClauses.push("tags = ?");
+      setClauses.push(`tags = $${idx++}`);
       values.push(JSON.stringify(updates.tags));
     }
     if (updates.snoozed_until !== undefined) {
-      setClauses.push("snoozed_until = ?");
-      values.push(updates.snoozed_until);
+      setClauses.push(`snoozed_until = $${idx++}`);
+      values.push(updates.snoozed_until ? new Date(updates.snoozed_until) : null);
     }
     if (updates.needs_clarification !== undefined) {
-      setClauses.push("needs_clarification = ?");
-      values.push(updates.needs_clarification ? 1 : 0);
+      setClauses.push(`needs_clarification = $${idx++}`);
+      values.push(updates.needs_clarification);
     }
     if (updates.clarification_question !== undefined) {
-      setClauses.push("clarification_question = ?");
+      setClauses.push(`clarification_question = $${idx++}`);
       values.push(updates.clarification_question);
     }
 
     values.push(id);
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       UPDATE tasks SET ${setClauses.join(", ")}
-      WHERE id = ?
+      WHERE id = $${idx}
       RETURNING *
-    `);
+      `,
+      values
+    );
 
-    const row = stmt.get(...values) as any;
-    if (!row) return null;
-    return {
-      ...row,
-      tags: JSON.parse(row.tags || "[]"),
-      needs_clarification: Boolean(row.needs_clarification),
-    };
+    const row = res.rows[0];
+    return row ? toTask(row) : null;
   },
 
-  searchTasks(userId: string, query: string, limit = 50): Task[] {
+  async searchTasks(userId: string, query: string, limit = 50): Promise<Task[]> {
     if (!query.trim()) return [];
-    // Clean search string for FTS5
-    const cleanQuery = query.replace(/[^\w\s]/gi, "").trim();
-    if (!cleanQuery) return [];
-
-    const ftsQuery = cleanQuery.split(/\s+/).map((w) => `"${w}"*`).join(" OR ");
-    const stmt = sqlite.prepare(`
-      SELECT t.* FROM tasks_fts f
-      JOIN tasks t ON t.id = f.task_id
-      WHERE tasks_fts MATCH ? AND t.user_id = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-
     try {
-      return stmt.all(ftsQuery, userId, limit).map((row: any) => ({
-        ...row,
-        tags: JSON.parse(row.tags || "[]"),
-        needs_clarification: Boolean(row.needs_clarification),
-      }));
-    } catch {
+      const res = await pool.query(
+        `
+        SELECT * FROM tasks
+        WHERE user_id = $1 AND search_vector @@ plainto_tsquery('english', $2)
+        ORDER BY ts_rank(search_vector, plainto_tsquery('english', $2)) DESC
+        LIMIT $3
+        `,
+        [userId, query.trim(), limit]
+      );
+
+      return res.rows.map(toTask);
+    } catch (err) {
+      console.warn("[Postgres Search] Search query failed:", err);
       return [];
     }
   },
 
   // ── Reminders ──────────────────────────────────────────────────────────────
-  createReminder(data: {
+  async createReminder(data: {
     userId: string;
     taskId: string;
     fireAt: string;
     channel: Reminder["channel"];
-  }): Reminder {
+  }): Promise<Reminder> {
     const id = `rem_${crypto.randomUUID()}`;
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       INSERT INTO reminders (id, user_id, task_id, fire_at, channel, status)
-      VALUES (?, ?, ?, ?, ?, 'pending')
+      VALUES ($1, $2, $3, $4, $5, 'pending')
       RETURNING *
-    `);
-    return stmt.get(id, data.userId, data.taskId, data.fireAt, data.channel) as Reminder;
+      `,
+      [id, data.userId, data.taskId, new Date(data.fireAt), data.channel]
+    );
+    return toReminder(res.rows[0]);
   },
 
-  getPendingReminders(nowIso: string): Array<Reminder & { task: Task }> {
-    const stmt = sqlite.prepare(`
+  async getPendingReminders(nowIso: string): Promise<Array<Reminder & { task: Task }>> {
+    const res = await pool.query(
+      `
       SELECT r.*, t.title as task_title, t.description as task_description,
              t.due_at as task_due_at, t.priority as task_priority, t.status as task_status
       FROM reminders r
       JOIN tasks t ON t.id = r.task_id
-      WHERE r.status = 'pending' AND datetime(r.fire_at) <= datetime(?) AND t.status IN ('needs_review', 'open')
+      WHERE r.status = 'pending' AND r.fire_at <= $1 AND t.status IN ('needs_review', 'open')
       ORDER BY r.fire_at ASC
-    `);
+      `,
+      [new Date(nowIso)]
+    );
 
-    const rows = stmt.all(nowIso) as any[];
-    return rows.map((r) => ({
+    return res.rows.map((r) => ({
       id: r.id,
       user_id: r.user_id,
       task_id: r.task_id,
-      fire_at: r.fire_at,
+      fire_at: toIso(r.fire_at) || new Date().toISOString(),
       channel: r.channel,
-      sent_at: r.sent_at,
+      sent_at: toIso(r.sent_at),
       status: r.status,
-      created_at: r.created_at,
+      created_at: toIso(r.created_at) || new Date().toISOString(),
       task: {
         id: r.task_id,
         user_id: r.user_id,
@@ -376,7 +459,7 @@ export const dbQueries = {
         title: r.task_title,
         description: r.task_description,
         requested_by: null,
-        due_at: r.task_due_at,
+        due_at: toIso(r.task_due_at),
         priority: r.task_priority,
         status: r.task_status,
         tags: [],
@@ -388,145 +471,152 @@ export const dbQueries = {
         needs_clarification: false,
         clarification_question: null,
         snoozed_until: null,
-        created_at: r.created_at,
-        updated_at: r.created_at,
+        created_at: toIso(r.created_at) || new Date().toISOString(),
+        updated_at: toIso(r.created_at) || new Date().toISOString(),
       },
     }));
   },
 
-  markReminderSent(id: string): void {
-    const stmt = sqlite.prepare(`
-      UPDATE reminders SET status = 'sent', sent_at = datetime('now') WHERE id = ?
-    `);
-    stmt.run(id);
+  async markReminderSent(id: string): Promise<void> {
+    await pool.query(`UPDATE reminders SET status = 'sent', sent_at = now() WHERE id = $1`, [id]);
   },
 
-  markReminderFailed(id: string): void {
-    const stmt = sqlite.prepare(`
-      UPDATE reminders SET status = 'failed' WHERE id = ?
-    `);
-    stmt.run(id);
+  async markReminderFailed(id: string): Promise<void> {
+    await pool.query(`UPDATE reminders SET status = 'failed' WHERE id = $1`, [id]);
   },
 
   // ── Devices ────────────────────────────────────────────────────────────────
-  upsertDevice(data: {
+  async upsertDevice(data: {
     id: string;
     userId: string;
     name: string;
     platform: Device["platform"];
     fcmToken?: string | null;
-  }): Device {
-    const stmt = sqlite.prepare(`
+  }): Promise<Device> {
+    const res = await pool.query(
+      `
       INSERT INTO devices (id, user_id, name, platform, fcm_token, last_active_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      VALUES ($1, $2, $3, $4, $5, now())
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         platform = excluded.platform,
         fcm_token = COALESCE(excluded.fcm_token, devices.fcm_token),
-        last_active_at = datetime('now')
+        last_active_at = now()
       RETURNING *
-    `);
-    return stmt.get(data.id, data.userId, data.name, data.platform, data.fcmToken || null) as Device;
+      `,
+      [data.id, data.userId, data.name, data.platform, data.fcmToken || null]
+    );
+    const r = res.rows[0];
+    return {
+      ...r,
+      last_active_at: toIso(r.last_active_at) || new Date().toISOString(),
+      created_at: toIso(r.created_at) || new Date().toISOString(),
+    };
   },
 
-  getUserDevices(userId: string): Device[] {
-    const stmt = sqlite.prepare(`SELECT * FROM devices WHERE user_id = ?`);
-    return stmt.all(userId) as Device[];
+  async getUserDevices(userId: string): Promise<Device[]> {
+    const res = await pool.query(`SELECT * FROM devices WHERE user_id = $1`, [userId]);
+    return res.rows.map((r) => ({
+      ...r,
+      last_active_at: toIso(r.last_active_at) || new Date().toISOString(),
+      created_at: toIso(r.created_at) || new Date().toISOString(),
+    }));
   },
 
-  removeInvalidTokens(tokens: string[]): void {
+  async removeInvalidTokens(tokens: string[]): Promise<void> {
     if (!tokens.length) return;
-    const placeholders = tokens.map(() => "?").join(",");
-    const stmt = sqlite.prepare(`
-      UPDATE devices SET fcm_token = NULL WHERE fcm_token IN (${placeholders})
-    `);
-    stmt.run(...tokens);
+    await pool.query(`UPDATE devices SET fcm_token = NULL WHERE fcm_token = ANY($1::text[])`, [
+      tokens,
+    ]);
   },
 
-  // ── Jobs ───────────────────────────────────────────────────────────────────
-  enqueueJob(type: string, payload: any, runAtIso?: string): Job {
+  // ── Jobs (Atomic claim with SELECT ... FOR UPDATE SKIP LOCKED) ──────────────
+  async enqueueJob(type: string, payload: any, runAtIso?: string): Promise<Job> {
     const id = `job_${crypto.randomUUID()}`;
-    const runAt = runAtIso || new Date().toISOString();
-    const stmt = sqlite.prepare(`
+    const runAt = runAtIso ? new Date(runAtIso) : new Date();
+    const res = await pool.query(
+      `
       INSERT INTO jobs (id, type, payload, run_at, status)
-      VALUES (?, ?, ?, ?, 'pending')
+      VALUES ($1, $2, $3, $4, 'pending')
       RETURNING *
-    `);
-    return stmt.get(id, type, JSON.stringify(payload), runAt) as Job;
+      `,
+      [id, type, JSON.stringify(payload), runAt]
+    );
+    return toJob(res.rows[0]);
   },
 
-  claimNextJob(): Job | null {
-    // Atomically find and claim the next pending job
-    const claim = sqlite.transaction(() => {
-      const findStmt = sqlite.prepare(`
-        SELECT * FROM jobs
-        WHERE status = 'pending' AND datetime(run_at) <= datetime('now', '+1 second')
+  async claimNextJob(): Promise<Job | null> {
+    // Atomic claim with SELECT ... FOR UPDATE SKIP LOCKED
+    const res = await pool.query(`
+      WITH next_job AS (
+        SELECT id FROM jobs
+        WHERE status = 'pending' AND run_at <= (now() + interval '1 second')
         ORDER BY run_at ASC
+        FOR UPDATE SKIP LOCKED
         LIMIT 1
-      `);
-      const job = findStmt.get() as Job | undefined;
-      if (!job) return null;
-
-      const updateStmt = sqlite.prepare(`
-        UPDATE jobs SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
-        WHERE id = ?
-      `);
-      updateStmt.run(job.id);
-      return { ...job, status: "processing" as const, attempts: job.attempts + 1 };
-    });
-
-    return claim();
-  },
-
-  completeJob(id: string): void {
-    const stmt = sqlite.prepare(`
-      UPDATE jobs SET status = 'completed', updated_at = datetime('now') WHERE id = ?
+      )
+      UPDATE jobs
+      SET status = 'processing', attempts = attempts + 1, updated_at = now()
+      WHERE id IN (SELECT id FROM next_job)
+      RETURNING *;
     `);
-    stmt.run(id);
+
+    const r = res.rows[0];
+    return r ? toJob(r) : null;
   },
 
-  failJob(id: string, error: string, retryDelaySec: number | null): void {
+  async completeJob(id: string): Promise<void> {
+    await pool.query(`UPDATE jobs SET status = 'completed', updated_at = now() WHERE id = $1`, [id]);
+  },
+
+  async failJob(id: string, error: string, retryDelaySec: number | null): Promise<void> {
     if (retryDelaySec !== null) {
-      const nextRunAt = new Date(Date.now() + retryDelaySec * 1000).toISOString();
-      const stmt = sqlite.prepare(`
+      await pool.query(
+        `
         UPDATE jobs
-        SET status = 'pending', error = ?, run_at = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `);
-      stmt.run(error, nextRunAt, id);
+        SET status = 'pending', error = $1, run_at = (now() + ($2 || ' seconds')::interval), updated_at = now()
+        WHERE id = $3
+        `,
+        [error, String(retryDelaySec), id]
+      );
     } else {
-      const stmt = sqlite.prepare(`
-        UPDATE jobs
-        SET status = 'failed', error = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `);
-      stmt.run(error, id);
+      await pool.query(
+        `UPDATE jobs SET status = 'failed', error = $1, updated_at = now() WHERE id = $2`,
+        [error, id]
+      );
     }
   },
 
   // ── Notes ──────────────────────────────────────────────────────────────────
-  createNote(data: { sessionId?: string | null; userId: string; content: string; tags?: string[] }): Note {
+  async createNote(data: {
+    sessionId?: string | null;
+    userId: string;
+    content: string;
+    tags?: string[];
+  }): Promise<Note> {
     const id = `note_${crypto.randomUUID()}`;
-    const stmt = sqlite.prepare(`
+    const res = await pool.query(
+      `
       INSERT INTO notes (id, session_id, user_id, content, tags)
-      VALUES (?, ?, ?, ?, ?)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING *
-    `);
-    const row = stmt.get(
-      id,
-      data.sessionId || null,
-      data.userId,
-      data.content,
-      JSON.stringify(data.tags || [])
-    ) as any;
-    return { ...row, tags: JSON.parse(row.tags || "[]") };
+      `,
+      [id, data.sessionId || null, data.userId, data.content, JSON.stringify(data.tags || [])]
+    );
+    const row = res.rows[0];
+    return {
+      ...row,
+      tags: typeof row.tags === "string" ? JSON.parse(row.tags) : row.tags || [],
+      created_at: toIso(row.created_at) || new Date().toISOString(),
+    };
   },
 
-  getSessionNotes(sessionId: string): Note[] {
-    const stmt = sqlite.prepare(`SELECT * FROM notes WHERE session_id = ?`);
-    return stmt.all(sessionId).map((row: any) => ({
+  async getSessionNotes(sessionId: string): Promise<Note[]> {
+    const res = await pool.query(`SELECT * FROM notes WHERE session_id = $1`, [sessionId]);
+    return res.rows.map((row) => ({
       ...row,
-      tags: JSON.parse(row.tags || "[]"),
+      tags: typeof row.tags === "string" ? JSON.parse(row.tags) : row.tags || [],
+      created_at: toIso(row.created_at) || new Date().toISOString(),
     }));
   },
 };

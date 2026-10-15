@@ -1,20 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildApp } from "../app.js";
+import { closeDatabase } from "../db/index.js";
 import type { FastifyInstance } from "fastify";
 
-describe("Fastify API Endpoints", () => {
+describe("Fastify API Endpoints with PostgreSQL", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = buildApp();
+    app = await buildApp();
     await app.ready();
   });
 
   afterAll(async () => {
     await app.close();
+    await closeDatabase();
   });
 
-  it("GET /health returns status ok", async () => {
+  it("GET /health returns status ok and database postgresql-16", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/health",
@@ -23,6 +25,7 @@ describe("Fastify API Endpoints", () => {
     const body = JSON.parse(res.payload);
     expect(body.status).toBe("ok");
     expect(body.service).toBe("taskcatch-api");
+    expect(body.database).toBe("postgresql-16");
   });
 
   it("POST /api/tasks creates a quick task and PATCH /api/tasks/:id updates it", async () => {

@@ -24,7 +24,7 @@ export class PipelineOrchestrator {
     customSpeechProvider?: SpeechProvider,
     customLLMProvider?: LLMProvider
   ): Promise<void> {
-    const session = dbQueries.getSession(sessionId);
+    const session = await dbQueries.getSession(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
@@ -38,7 +38,7 @@ export class PipelineOrchestrator {
     const llmProvider = customLLMProvider || this.defaultLLMProvider;
 
     // 1. Mark session as processing
-    const processingSession = dbQueries.updateSession(sessionId, { status: "processing" });
+    const processingSession = await dbQueries.updateSession(sessionId, { status: "processing" });
     if (processingSession) {
       wsService.broadcastToUser(session.user_id, {
         type: "session.updated",
@@ -53,10 +53,10 @@ export class PipelineOrchestrator {
       const sttResult = await speechProvider.transcribe(audioPath);
 
       // Save segments
-      dbQueries.insertSegments(sessionId, sttResult.segments);
+      await dbQueries.insertSegments(sessionId, sttResult.segments);
 
       // 3. Load Bookmarks
-      const bookmarks = dbQueries.getBookmarks(sessionId);
+      const bookmarks = await dbQueries.getBookmarks(sessionId);
 
       // 4. Translate & Extract Tasks via LLM
       const sessionDate = new Date(session.created_at);
@@ -88,7 +88,7 @@ export class PipelineOrchestrator {
       // 6. Save Extracted Tasks & Schedule Default Reminders
       const createdTasks = [];
       for (const t of tasks) {
-        const created = dbQueries.createTask({
+        const created = await dbQueries.createTask({
           userId: session.user_id,
           sessionId: session.id,
           title: t.title,
@@ -118,7 +118,7 @@ export class PipelineOrchestrator {
 
           // 1 day before (if still in future)
           if (oneDayBefore.getTime() > now) {
-            dbQueries.createReminder({
+            await dbQueries.createReminder({
               userId: session.user_id,
               taskId: created.id,
               fireAt: oneDayBefore.toISOString(),
@@ -128,7 +128,7 @@ export class PipelineOrchestrator {
 
           // 1 hour before
           if (oneHourBefore.getTime() > now) {
-            dbQueries.createReminder({
+            await dbQueries.createReminder({
               userId: session.user_id,
               taskId: created.id,
               fireAt: oneHourBefore.toISOString(),
@@ -138,7 +138,7 @@ export class PipelineOrchestrator {
 
           // At due time
           if (dueTime > now) {
-            dbQueries.createReminder({
+            await dbQueries.createReminder({
               userId: session.user_id,
               taskId: created.id,
               fireAt: new Date(dueTime).toISOString(),
@@ -150,7 +150,7 @@ export class PipelineOrchestrator {
 
       // 7. Save FYI Notes
       for (const note of fyi_notes) {
-        dbQueries.createNote({
+        await dbQueries.createNote({
           sessionId: session.id,
           userId: session.user_id,
           content: note,
@@ -159,7 +159,7 @@ export class PipelineOrchestrator {
       }
 
       // 8. Update Session to Processed
-      const completedSession = dbQueries.updateSession(sessionId, {
+      const completedSession = await dbQueries.updateSession(sessionId, {
         status: "processed",
         summary,
         language_detected: sttResult.language_detected,
@@ -190,7 +190,7 @@ export class PipelineOrchestrator {
       }
     } catch (err: any) {
       console.error(`[Pipeline] Failed to process session ${sessionId}:`, err);
-      dbQueries.updateSession(sessionId, { status: "failed" });
+      await dbQueries.updateSession(sessionId, { status: "failed" });
       throw err;
     }
   }

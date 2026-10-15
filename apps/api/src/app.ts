@@ -11,15 +11,15 @@ import { sessionRoutes } from "./routes/sessions.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { settingRoutes } from "./routes/settings.js";
 
-export function buildApp() {
+export async function buildApp() {
   const app = fastify({
     logger: {
       level: config.env === "development" ? "info" : "warn",
     },
   });
 
-  // Database initialization
-  initDatabase();
+  // Database initialization (PostgreSQL 16)
+  await initDatabase();
 
   // Firebase Admin initialization (non-blocking if not configured)
   initFirebase();
@@ -45,6 +45,7 @@ export function buildApp() {
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       service: "taskcatch-api",
+      database: "postgresql-16",
     };
   });
 

@@ -17,7 +17,7 @@ export const deviceRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: parsed.error.format() });
     }
 
-    const device = dbQueries.upsertDevice({
+    const device = await dbQueries.upsertDevice({
       id: parsed.data.id,
       userId: config.defaultUserId,
       name: parsed.data.name,
@@ -29,7 +29,7 @@ export const deviceRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/", async (req, reply) => {
-    const devices = dbQueries.getUserDevices(config.defaultUserId);
+    const devices = await dbQueries.getUserDevices(config.defaultUserId);
     return reply.send({ devices });
   });
 };

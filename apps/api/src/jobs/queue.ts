@@ -17,8 +17,8 @@ export class JobQueueManager {
     this.handlers.set(type, handler);
   }
 
-  enqueueJob(type: string, payload: any, runAtIso?: string): Job {
-    return dbQueries.enqueueJob(type, payload, runAtIso);
+  async enqueueJob(type: string, payload: any, runAtIso?: string): Promise<Job> {
+    return await dbQueries.enqueueJob(type, payload, runAtIso);
   }
 
   start(): void {
@@ -41,7 +41,6 @@ export class JobQueueManager {
       try {
         await this.processNextJob();
       } catch (err) {
-        // Log unexpected worker crash
         console.error("[JobQueue] Unexpected error in worker loop:", err);
       } finally {
         this.scheduleNextTick();
@@ -50,28 +49,28 @@ export class JobQueueManager {
   }
 
   async processNextJob(): Promise<boolean> {
-    const job = dbQueries.claimNextJob();
+    const job = await dbQueries.claimNextJob();
     if (!job) return false;
 
     const handler = this.handlers.get(job.type);
     if (!handler) {
-      dbQueries.failJob(job.id, `No worker handler registered for job type: ${job.type}`, null);
+      await dbQueries.failJob(job.id, `No worker handler registered for job type: ${job.type}`, null);
       return false;
     }
 
     try {
-      const parsedPayload = JSON.parse(job.payload);
+      const parsedPayload = typeof job.payload === "string" ? JSON.parse(job.payload) : job.payload;
       await handler(parsedPayload, job);
-      dbQueries.completeJob(job.id);
+      await dbQueries.completeJob(job.id);
       return true;
     } catch (err: any) {
       const errorMsg = err?.message || String(err);
       if (job.attempts < job.max_attempts) {
         // Exponential backoff: 5s, 10s, 20s, 40s, 80s (max 300s)
         const backoffSec = Math.min(300, Math.pow(2, job.attempts) * 5);
-        dbQueries.failJob(job.id, errorMsg, backoffSec);
+        await dbQueries.failJob(job.id, errorMsg, backoffSec);
       } else {
-        dbQueries.failJob(job.id, `Max attempts reached. Last error: ${errorMsg}`, null);
+        await dbQueries.failJob(job.id, `Max attempts reached. Last error: ${errorMsg}`, null);
       }
       return false;
     }

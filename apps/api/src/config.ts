@@ -11,7 +11,10 @@ export const config = {
   apiBaseUrl: process.env.API_BASE_URL || "http://localhost:3000",
   corsOrigin: (process.env.CORS_ORIGIN || "http://localhost:5173,http://localhost:3000").split(","),
 
-  databasePath: path.resolve(process.cwd(), process.env.DATABASE_PATH || "./data/taskcatch.sqlite"),
+  // PostgreSQL 16 connection string
+  databaseUrl:
+    process.env.DATABASE_URL ||
+    "postgresql://taskcatch:taskcatch_dev_secret@localhost:5433/taskcatch",
   storageDir: path.resolve(process.cwd(), process.env.STORAGE_DIR || "./data/uploads"),
 
   defaultUserId: process.env.DEFAULT_USER_ID || "user_personal_01",

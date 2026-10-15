@@ -20,20 +20,20 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   // ── List Sessions ──────────────────────────────────────────────────────────
   fastify.get("/", async (req, reply) => {
     const userId = config.defaultUserId;
-    const sessions = dbQueries.listSessions(userId);
+    const sessions = await dbQueries.listSessions(userId);
     return reply.send({ sessions });
   });
 
   // ── Get Session Details ────────────────────────────────────────────────────
   fastify.get("/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = dbQueries.getSession(id);
+    const session = await dbQueries.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
 
-    const segments = dbQueries.getSegments(id);
-    const bookmarks = dbQueries.getBookmarks(id);
-    const tasks = dbQueries.listTasks({ userId: session.user_id, sessionId: id });
-    const notes = dbQueries.getSessionNotes(id);
+    const segments = await dbQueries.getSegments(id);
+    const bookmarks = await dbQueries.getBookmarks(id);
+    const tasks = await dbQueries.listTasks({ userId: session.user_id, sessionId: id });
+    const notes = await dbQueries.getSessionNotes(id);
 
     return reply.send({
       session,
@@ -51,7 +51,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       status?: "recording" | "uploaded";
     };
 
-    const session = dbQueries.createSession({
+    const session = await dbQueries.createSession({
       userId: config.defaultUserId,
       deviceId: body.deviceId || "device_web",
       status: body.status || "recording",
@@ -70,17 +70,17 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = req.params as { id: string };
     const body = req.body as { timestampMs: number; label?: string };
 
-    const session = dbQueries.getSession(id);
+    const session = await dbQueries.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
 
-    const bookmark = dbQueries.addBookmark(id, body.timestampMs, body.label);
+    const bookmark = await dbQueries.addBookmark(id, body.timestampMs, body.label);
     return reply.status(201).send({ bookmark });
   });
 
   // ── Upload Chunk (Resumable Chunked Upload) ─────────────────────────────────
   fastify.post("/:id/chunks", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = dbQueries.getSession(id);
+    const session = await dbQueries.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
 
     const data = await req.file();
@@ -98,7 +98,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   // ── Finish Chunked Session ─────────────────────────────────────────────────
   fastify.post("/:id/finish", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = dbQueries.getSession(id);
+    const session = await dbQueries.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
 
     // Find and sort all uploaded chunks for this session
@@ -128,13 +128,13 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       await execAsync(`ffmpeg -y -f lavfi -i anullsrc=r=16000:cl=mono -t 1 "${outputWav}"`);
     }
 
-    dbQueries.updateSession(id, {
+    await dbQueries.updateSession(id, {
       audio_path: outputWav,
       status: "uploaded",
     });
 
     // Enqueue async processing pipeline job
-    jobQueue.enqueueJob("process_session", { sessionId: id });
+    await jobQueue.enqueueJob("process_session", { sessionId: id });
 
     return reply.send({ success: true, status: "uploaded", audioPath: outputWav });
   });
@@ -160,7 +160,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       fs.copyFileSync(rawPath, normalizedWav);
     }
 
-    const session = dbQueries.createSession({
+    const session = await dbQueries.createSession({
       id: sessionId,
       userId: config.defaultUserId,
       deviceId: "import",
@@ -169,7 +169,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Enqueue processing
-    jobQueue.enqueueJob("process_session", { sessionId: session.id });
+    await jobQueue.enqueueJob("process_session", { sessionId: session.id });
 
     return reply.status(201).send({ session });
   });
@@ -177,11 +177,11 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   // ── Reprocess Session ──────────────────────────────────────────────────────
   fastify.post("/:id/reprocess", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = dbQueries.getSession(id);
+    const session = await dbQueries.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
 
-    dbQueries.updateSession(id, { status: "uploaded" });
-    jobQueue.enqueueJob("process_session", { sessionId: id });
+    await dbQueries.updateSession(id, { status: "uploaded" });
+    await jobQueue.enqueueJob("process_session", { sessionId: id });
 
     return reply.send({ success: true, message: "Session enqueued for reprocessing" });
   });
@@ -189,7 +189,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   // ── Stream Audio ───────────────────────────────────────────────────────────
   fastify.get("/:id/audio", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = dbQueries.getSession(id);
+    const session = await dbQueries.getSession(id);
     if (!session || !session.audio_path || !fs.existsSync(session.audio_path)) {
       return reply.status(404).send({ error: "Audio not found" });
     }

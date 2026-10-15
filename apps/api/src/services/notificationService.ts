@@ -86,7 +86,7 @@ export async function sendPushNotification(data: {
     return { sent: 0, failed: 0 };
   }
 
-  const devices = dbQueries.getUserDevices(data.userId);
+  const devices = await dbQueries.getUserDevices(data.userId);
   const tokens = devices
     .map((d) => d.fcm_token)
     .filter((token): token is string => Boolean(token && token.trim()));
@@ -133,7 +133,7 @@ export async function sendPushNotification(data: {
     });
 
     if (invalidTokens.length > 0) {
-      dbQueries.removeInvalidTokens(invalidTokens);
+      await dbQueries.removeInvalidTokens(invalidTokens);
     }
 
     return { sent: response.successCount, failed: response.failureCount };

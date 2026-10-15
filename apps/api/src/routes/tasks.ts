@@ -34,7 +34,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       limit?: string;
     };
     const userId = config.defaultUserId;
-    const tasks = dbQueries.listTasks({
+    const tasks = await dbQueries.listTasks({
       userId,
       status: query.status,
       sessionId: query.sessionId,
@@ -46,7 +46,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   // ── Today View ─────────────────────────────────────────────────────────────
   fastify.get("/today", async (req, reply) => {
     const userId = config.defaultUserId;
-    const allOpenTasks = dbQueries.listTasks({ userId, limit: 200 });
+    const allOpenTasks = await dbQueries.listTasks({ userId, limit: 200 });
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -83,18 +83,18 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     });
   });
 
-  // ── Full-Text Search ───────────────────────────────────────────────────────
+  // ── Full-Text Search (Postgres tsvector plainto_tsquery) ───────────────────
   fastify.get("/search", async (req, reply) => {
     const query = (req.query as { q?: string }).q || "";
     const userId = config.defaultUserId;
-    const results = dbQueries.searchTasks(userId, query);
+    const results = await dbQueries.searchTasks(userId, query);
     return reply.send({ tasks: results });
   });
 
   // ── Get Task by ID ─────────────────────────────────────────────────────────
   fastify.get("/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const task = dbQueries.getTask(id);
+    const task = await dbQueries.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
     return reply.send({ task });
   });
@@ -107,7 +107,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const userId = config.defaultUserId;
-    const task = dbQueries.createTask({
+    const task = await dbQueries.createTask({
       userId,
       title: parsed.data.title,
       description: parsed.data.description,
@@ -135,7 +135,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: parsed.error.format() });
     }
 
-    const updated = dbQueries.updateTask(id, parsed.data);
+    const updated = await dbQueries.updateTask(id, parsed.data);
     if (!updated) {
       return reply.status(404).send({ error: "Task not found" });
     }
@@ -154,10 +154,10 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = req.params as { id: string };
     const body = req.body as { clarification: string };
 
-    const task = dbQueries.getTask(id);
+    const task = await dbQueries.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
 
-    const updated = dbQueries.updateTask(id, {
+    const updated = await dbQueries.updateTask(id, {
       description: `${task.description}\n\nClarification Note: ${body.clarification || "User answered clarification."}`,
       needs_clarification: false,
     });

@@ -10,9 +10,9 @@ TaskCatch strictly adheres to the **Zero-Cost / Free-Only Rule**. No paid APIs, 
 | :--- | :--- | :--- | :--- |
 | **Backend Runtime** | Node.js (v20+) | MIT | Free / Open Source |
 | **Web Framework** | Fastify | MIT | Free / Open Source |
-| **Database** | SQLite + better-sqlite3 | Public Domain / MIT | Free / Embedded Local File |
-| **ORM & Migrations** | Drizzle ORM | Apache-2.0 | Free / Open Source |
-| **Full-Text Search** | SQLite FTS5 | Public Domain | Free / Built into SQLite |
+| **Database** | PostgreSQL 16 | PostgreSQL License | Free / Open Source (Local Docker or Native Service) |
+| **ORM & Migrations** | Drizzle ORM (node-postgres) | Apache-2.0 | Free / Open Source |
+| **Full-Text Search** | PostgreSQL tsvector + GIN Index | PostgreSQL License | Free / Native PostgreSQL Feature |
 | **Validation** | Zod | MIT | Free / Open Source |
 | **Logging** | Pino | MIT | Free / Open Source |
 | **Realtime WebSockets** | `@fastify/websocket` / `ws` | MIT | Free / In-process local connections |
