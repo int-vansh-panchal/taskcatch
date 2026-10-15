@@ -1,0 +1,15 @@
+[
+  {
+    "model": "solar-small",
+    "audio_duration_sec": 5.71,
+    "process_time_sec": 10.148,
+    "real_time_factor": 0.56,
+    "detected_lang": "en",
+    "lang_prob": 0.971,
+    "original_text": "Please prepare the weekly deployment report by tomorrow evening at 5 p.m.",
+    "english_text": "Please prepare the weekly deployment report by tomorrow evening at 5 p.m.",
+    "filename": "01_english_deploy.wav",
+    "reference_text": "Please prepare the weekly deployment report by tomorrow evening at 5 PM.",
+    "wer": null
+  }
+]

@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment and Credentials (STRICT)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*service-account*.json
+*firebase-adminsdk*.json
+serviceAccountKey.json
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.turbo/
+.cache/
+
+# Python Virtualenv and cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local databases & uploads
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+uploads/
+audio_cache/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# Testing & Logs
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Model cache
+.cache_models/
