@@ -4,44 +4,86 @@ TaskCatch is a production-grade personal system built for hands-free work instru
 
 ---
 
-## Architecture Overview
+## System Architecture
 
 ```mermaid
-graph TD
-    subgraph Clients
-        PWA["📱 Mobile PWA (Android / iOS)\nIndexedDB Queue, Wake Lock, Web Share Target"]
-        Desktop["💻 Ubuntu Desktop Widget (Electron)\n320x420 / Pill, Global Hotkeys, PipeWire Monitor"]
+flowchart TD
+    %% Client Tier
+    subgraph CLIENTS["📱 Client Tier"]
+        direction LR
+        PWA["Mobile PWA (Android / iOS)<br/>• IndexedDB Queue & Wake Lock<br/>• Web Share Target (Voice Notes)"]
+        DESKTOP["Ubuntu Desktop Widget<br/>• Electron Always-on-Top Pill<br/>• Global Hotkeys & PipeWire Audio"]
     end
 
-    subgraph Tunnel
-        Tailscale["🔒 Tailscale HTTPS (Free)\ntailscale serve --https=443 http://localhost:3000"]
+    %% Ingress & API Gateway
+    subgraph INGRESS["🌐 Ingress & API Gateway (Port 3000)"]
+        direction TB
+        TAILSCALE["Tailscale HTTPS Tunnel<br/><code>tailscale serve --https=443</code>"]
+        API["Fastify 4.29 API Server<br/>• Argon2id JWT Auth & CORS<br/>• HTTP 206 Byte-Range Audio Stream<br/>• Realtime WebSocket Event Bus"]
     end
 
-    subgraph Backend Core
-        Fastify["⚡ Fastify API (TypeScript, Port 3000)\nArgon2id JWT, Range Streaming, WebSockets"]
-        Queue["📦 Atomic Queue\nSELECT ... FOR UPDATE SKIP LOCKED"]
-        Pipeline["🎼 Pipeline Orchestrator\nSingle-Pass STT + Local LLM Extraction"]
-        Scheduler["⏰ Reminder Engine\nDeduped Poller, Snooze, Quiet Hours"]
+    %% Execution & Processing
+    subgraph CORE["⚙️ Asynchronous Processing Core"]
+        direction TB
+        QUEUE["Atomic Job Queue<br/><code>SELECT ... FOR UPDATE SKIP LOCKED</code>"]
+        ORCH["Pipeline Orchestrator<br/>• 16kHz Audio Normalization & Concat<br/>• Dual-Pass STT & Task Extraction"]
+        SCHED["Reminder Engine<br/>• 30s Deduped Poller & Quiet Hours<br/>• Native Desktop & Web Alerts"]
     end
 
-    subgraph Persistence & AI
-        Postgres[("🐘 PostgreSQL 16 (Port 5433)\nGIN tsvector Search, Drizzle ORM")]
-        STT["🎙️ faster-whisper Sidecar (Port 8000)\nint8, Silero VAD, Vocabulary Hints, Auto-Unload"]
-        LLM["🧠 Ollama Local LLM (Port 11434)\nqwen2.5:7b-instruct, keep_alive: 2m"]
-        FCM["🔔 Firebase Cloud Messaging\nFree Spark Plan (Web Push / Mobile)"]
+    %% Storage & AI Engines
+    subgraph SERVICES["🧠 Local AI & Persistence Layer"]
+        direction LR
+        STT["🎙️ faster-whisper Sidecar (Port 8000)<br/>• int8 CPU Quantization & Silero VAD<br/>• Indian Vocabulary Hints & Auto-Unload"]
+        LLM["🦙 Ollama Local LLM (Port 11434)<br/>• Qwen 2.5 (1.5B / 3B / 7B)<br/>• Strict JSON Schema & Indian Date Resolver"]
+        DB[("🐘 PostgreSQL 16 (Port 5433)<br/>• GIN tsvector Search<br/>• Drizzle Relational Schema")]
+        FCM["🔔 Firebase Cloud Messaging<br/>• Free Spark Web & Mobile Push"]
     end
 
-    PWA --> Tailscale --> Fastify
-    Desktop --> Fastify
-    Fastify --> Queue --> Pipeline
-    Pipeline --> STT
-    Pipeline --> LLM
-    Pipeline --> Postgres
-    Scheduler --> Postgres
-    Scheduler --> FCM
-    Scheduler --> Fastify
-    Fastify --> PWA
-    Fastify --> Desktop
+    %% Clean Data Flow
+    PWA -->|Remote Access| TAILSCALE
+    TAILSCALE -->|Forward| API
+    PWA -->|Local WiFi / USB| API
+    DESKTOP -->|Localhost| API
+
+    API -->|Enqueue 'process_session'| QUEUE
+    QUEUE -->|Dispatch Job| ORCH
+
+    ORCH -->|1. Transcribe Audio| STT
+    ORCH -->|2. Extract Tasks JSON| LLM
+    ORCH -->|3. Persist Tasks & Segments| DB
+
+    SCHED -->|Poll Due Reminders| DB
+    SCHED -->|Dispatch Push Notifications| FCM
+    SCHED -->|Broadcast WS Events| API
+```
+
+### End-to-End Voice-to-Task Pipeline
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Engineer / User
+    participant App as Mobile PWA / Desktop Widget
+    participant API as Fastify API Server (:3000)
+    participant Worker as Background Queue (:5433)
+    participant STT as faster-whisper (:8000)
+    participant LLM as Ollama Qwen 2.5 (:11434)
+    participant Push as FCM / WebSockets
+
+    User->>App: Speaks conversation (Hindi / Gujarati / Hinglish / English)
+    App->>API: Streams 10s audio chunks + user bookmarks
+    User->>App: Stops recording
+    App->>API: POST /api/sessions/:id/finish
+    API->>Worker: Enqueues 'process_session' job (Atomic SKIP LOCKED)
+    Worker->>STT: Transcribes audio (Single/Dual-pass + Indian vocab hints)
+    STT-->>Worker: Timed speech segments & translated English text
+    Worker->>LLM: Prompts with transcript segments + bookmarks + Indian date context
+    LLM-->>Worker: Validated JSON tasks with confidence scores & due dates
+    Worker->>Worker: Stores tasks as 'needs_review' in PostgreSQL 16
+    Worker->>Push: Emits WebSocket 'session.processed' + FCM push notification
+    Push-->>App: Displays badge in Review Inbox
+    User->>App: Confirms tasks & resolves any clarification questions
+    App->>API: PATCH /api/tasks/:id (status: 'open') -> Scheduled in Today view
 ```
 
 ---
@@ -84,7 +126,7 @@ See [`docs/COSTS.md`](file:///home/lenovo/taskcatch/docs/COSTS.md) for full brea
 To start all services together with color-coded live logs directly streaming in your terminal:
 
 ```bash
-# Starts PostgreSQL (Docker), API (port 3000), STT sidecar (port 8000), and Web PWA (port 5173)
+# Starts PostgreSQL (Docker), API (port 3000), STT sidecar (port 8000), and Web PWA (port 5174)
 npm run dev
 
 # Or include the Electron Desktop Widget in the same terminal session:
