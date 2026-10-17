@@ -1,7 +1,5 @@
-const CACHE_NAME = "taskcatch-v1";
+const CACHE_NAME = "taskcatch-v2";
 const ASSETS_TO_CACHE = [
-  "/",
-  "/index.html",
   "/manifest.json",
   "/icon.svg"
 ];
@@ -26,7 +24,7 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Cache-first for static assets, network-first for API
+// Cache strategies: Network-first for navigation & API, cache-first for immutable static assets
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
@@ -35,6 +33,23 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // 1. Navigation requests (HTML page loads): ALWAYS Network-First
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request).then((res) => res || caches.match("/index.html")))
+    );
+    return;
+  }
+
+  // 2. Static assets: Cache-first with network fallback
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) return cachedResponse;
@@ -51,10 +66,6 @@ self.addEventListener("fetch", (event) => {
         }
         return networkResponse;
       });
-    }).catch(() => {
-      if (event.request.mode === "navigate") {
-        return caches.match("/index.html");
-      }
     })
   );
 });

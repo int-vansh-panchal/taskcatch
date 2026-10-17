@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true, // Listen on 0.0.0.0 for Tailscale access
-    port: 5173,
+    port: 5174,
     proxy: {
       "/api": {
         target: "http://localhost:3000",

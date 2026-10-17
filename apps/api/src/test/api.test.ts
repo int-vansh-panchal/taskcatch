@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildApp } from "../app.js";
-import { closeDatabase } from "../db/index.js";
+import { closeDatabase, pool } from "../db/index.js";
 import type { FastifyInstance } from "fastify";
 
 describe("Fastify API Endpoints with PostgreSQL", () => {
@@ -12,6 +12,7 @@ describe("Fastify API Endpoints with PostgreSQL", () => {
   });
 
   afterAll(async () => {
+    await pool.query("DELETE FROM tasks WHERE title LIKE 'Test quick manual task%'");
     await app.close();
     await closeDatabase();
   });
@@ -57,6 +58,14 @@ describe("Fastify API Endpoints with PostgreSQL", () => {
     expect(patchRes.statusCode).toBe(200);
     const updated = JSON.parse(patchRes.payload).task;
     expect(updated.status).toBe("done");
+
+    // Delete task
+    const delRes = await app.inject({
+      method: "DELETE",
+      url: `/api/tasks/${created.id}`,
+    });
+    expect(delRes.statusCode).toBe(200);
+    expect(JSON.parse(delRes.payload).success).toBe(true);
   });
 
   it("GET /api/tasks/today returns structured today view", async () => {
@@ -71,6 +80,7 @@ describe("Fastify API Endpoints with PostgreSQL", () => {
     expect(body).toHaveProperty("dueToday");
     expect(body).toHaveProperty("upcoming");
     expect(body).toHaveProperty("noDate");
+    expect(body).toHaveProperty("completed");
   });
 
   it("GET /api/sessions and POST /api/sessions", async () => {

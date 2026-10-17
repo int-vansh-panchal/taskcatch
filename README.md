@@ -80,23 +80,26 @@ See [`docs/COSTS.md`](file:///home/lenovo/taskcatch/docs/COSTS.md) for full brea
 - `ffmpeg` (`sudo apt install ffmpeg`)
 - Ollama local daemon (`curl -fsSL https://ollama.com/install.sh | sh && ollama pull qwen2.5:7b-instruct`)
 
-### 2. Automated Install Script
-Run the automated installer to set up dependencies, migrations, and systemd user services:
+### 2. Unified One-Command Development & Live Logs
+To start all services together with color-coded live logs directly streaming in your terminal:
 
 ```bash
-cd /home/lenovo/taskcatch
-./scripts/install.sh
+# Starts PostgreSQL (Docker), API (port 3000), STT sidecar (port 8000), and Web PWA (port 5173)
+npm run dev
+
+# Or include the Electron Desktop Widget in the same terminal session:
+npm run dev:all
 ```
 
-This creates and starts three systemd user services:
+To tail live logs if services are running in background systemd mode:
 ```bash
-systemctl --user status taskcatch-postgres taskcatch-stt taskcatch-api
+npm run logs
 ```
 
 ### 3. Desktop Electron Widget
-To launch the always-on-top desktop assistant:
+To launch only the always-on-top desktop assistant:
 ```bash
-cd /home/lenovo/taskcatch/apps/desktop
+cd apps/desktop
 npm start
 ```
 - **Global Hotkeys:**

@@ -39,7 +39,30 @@ export class OllamaLLMProvider implements LLMProvider {
     timezone: string,
     options?: { model?: string; vocabularyHints?: string }
   ): Promise<ExtractionPipelineResult> {
-    const model = options?.model || this.defaultModel;
+    let model = options?.model || this.defaultModel;
+
+    // Auto-detect installed models in Ollama if the requested model isn't found
+    try {
+      const tagsRes = await fetch(`${this.baseUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+      if (tagsRes.ok) {
+        const data = (await tagsRes.json()) as any;
+        const available: string[] = (data.models || []).map((m: any) => m.name);
+        if (available.length > 0 && !available.includes(model)) {
+          // Check if a partial match exists (e.g. qwen2.5:1.5b-instruct matches qwen2.5)
+          const matched = available.find((n) => n.startsWith(model.split(":")[0]) || model.startsWith(n.split(":")[0]));
+          if (matched) {
+            model = matched;
+          } else {
+            // Fall back to first available model
+            model = available[0];
+          }
+          console.info(`[Ollama] Using active local model: '${model}'`);
+        }
+      }
+    } catch {
+      // Continue with specified model
+    }
+
     const sessionDateIso = sessionDate.toISOString();
     const vocabHints = options?.vocabularyHints ? `Domain Vocabulary Hints: ${options.vocabularyHints}` : "";
 

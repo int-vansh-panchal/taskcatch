@@ -101,15 +101,35 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
     const session = await dbQueries.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
 
-    // Find and sort all uploaded chunks for this session
-    const chunkFiles = fs
+    // Find and sort all uploaded chunks for this session (with brief retry for in-flight requests)
+    let chunkFiles = fs
       .readdirSync(chunkDir)
       .filter((f) => f.startsWith(`${id}_part_`))
       .sort();
 
+    if (chunkFiles.length === 0) {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise((r) => setTimeout(r, 400));
+        chunkFiles = fs
+          .readdirSync(chunkDir)
+          .filter((f) => f.startsWith(`${id}_part_`))
+          .sort();
+        if (chunkFiles.length > 0) break;
+      }
+    }
+
     const outputWav = path.join(uploadDir, `${id}.wav`);
 
-    if (chunkFiles.length > 0) {
+    if (chunkFiles.length === 1) {
+      // Fast, 100% reliable direct conversion for single-chunk sessions
+      const singlePath = path.join(chunkDir, chunkFiles[0]);
+      try {
+        await execAsync(`ffmpeg -y -i "${singlePath}" -ar 16000 -ac 1 "${outputWav}"`);
+      } catch (err) {
+        console.warn(`[Sessions] ffmpeg single-chunk conversion warning:`, err);
+        fs.copyFileSync(singlePath, outputWav);
+      }
+    } else if (chunkFiles.length > 1) {
       // Create a concat list for ffmpeg
       const concatListFile = path.join(chunkDir, `${id}_concat.txt`);
       const fileLines = chunkFiles.map((f) => `file '${path.join(chunkDir, f)}'`).join("\n");
@@ -120,11 +140,18 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
         await execAsync(`ffmpeg -y -f concat -safe 0 -i "${concatListFile}" -ar 16000 -ac 1 "${outputWav}"`);
       } catch (err) {
         console.warn(`[Sessions] ffmpeg concat warning, attempting single input:`, err);
+        // Fallback: convert the largest chunk so processing doesn't fail
+        const largest = chunkFiles.reduce((prev, curr) => {
+          const sPrev = fs.statSync(path.join(chunkDir, prev)).size;
+          const sCurr = fs.statSync(path.join(chunkDir, curr)).size;
+          return sCurr > sPrev ? curr : prev;
+        }, chunkFiles[0]);
+        await execAsync(`ffmpeg -y -i "${path.join(chunkDir, largest)}" -ar 16000 -ac 1 "${outputWav}"`);
       } finally {
         if (fs.existsSync(concatListFile)) fs.unlinkSync(concatListFile);
       }
     } else {
-      // Fallback: create empty or placeholder WAV
+      // Fallback: create empty placeholder WAV
       await execAsync(`ffmpeg -y -f lavfi -i anullsrc=r=16000:cl=mono -t 1 "${outputWav}"`);
     }
 

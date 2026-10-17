@@ -1,16 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { dbQueries } from "../db/queries.js";
 import { initDatabase, pool } from "../db/index.js";
-import { config } from "../config.js";
 
 describe("Reminder Engine Deduplication & Scheduling", () => {
-  const testUserId = config.defaultUserId;
+  const testUserId = "user_test_reminders_dedupe";
 
   beforeAll(async () => {
     await initDatabase();
+    await pool.query(
+      `INSERT INTO users (id, name, email) VALUES ($1, 'Test Reminders User', 'test_reminders@taskcatch.test') ON CONFLICT (id) DO NOTHING`,
+      [testUserId]
+    );
+    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [testUserId]);
   });
 
   afterAll(async () => {
+    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [testUserId]);
+    await pool.query(`DELETE FROM users WHERE id = $1`, [testUserId]);
     await pool.end();
   });
 

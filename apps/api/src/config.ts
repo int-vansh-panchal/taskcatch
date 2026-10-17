@@ -9,7 +9,7 @@ export const config = {
   port: parseInt(process.env.PORT || "3000", 10),
   host: process.env.HOST || "0.0.0.0",
   apiBaseUrl: process.env.API_BASE_URL || "http://localhost:3000",
-  corsOrigin: (process.env.CORS_ORIGIN || "http://localhost:5173,http://localhost:3000").split(","),
+  corsOrigin: (process.env.CORS_ORIGIN || "http://localhost:5174,http://localhost:5173,http://localhost:3000").split(","),
 
   // PostgreSQL 16 connection string
   databaseUrl:

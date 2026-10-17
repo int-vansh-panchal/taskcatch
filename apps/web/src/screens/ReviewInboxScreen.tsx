@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Check,
   X,
-  Play,
   Volume2,
   Calendar,
   AlertCircle,
@@ -13,8 +12,10 @@ import {
   RefreshCw,
   Tag,
   Clock,
-  ArrowRight,
-  MessageSquare,
+  Filter,
+  CheckCircle2,
+  ChevronRight,
+  Info,
 } from "lucide-react";
 import { apiRequest } from "../api";
 import { AudioPlayer } from "../components/AudioPlayer";
@@ -47,6 +48,7 @@ export const ReviewInboxScreen: React.FC = () => {
   const [editingTask, setEditingTask] = useState<ReviewTask | null>(null);
   const [clarificationInputs, setClarificationInputs] = useState<Record<string, string>>({});
   const [isBulkConfirming, setIsBulkConfirming] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<"all" | "clarification" | "high_conf">("all");
 
   const { socket } = useWebSocket();
 
@@ -73,11 +75,16 @@ export const ReviewInboxScreen: React.FC = () => {
     const handleMessage = (e: MessageEvent) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === "task.created" || msg.type === "session.processed") {
+        if (
+          msg.type === "task.created" ||
+          msg.type === "session.processed" ||
+          msg.type === "task.updated" ||
+          msg.type === "task.deleted"
+        ) {
           loadReviewTasks();
         }
       } catch {
-        // ignore
+        // ignore non-json
       }
     };
     socket.addEventListener("message", handleMessage);
@@ -99,12 +106,11 @@ export const ReviewInboxScreen: React.FC = () => {
   const handleDiscard = async (taskId: string) => {
     try {
       await apiRequest(`/api/tasks/${taskId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "discarded" }),
+        method: "DELETE",
       });
       setTasks((prev) => prev.filter((t) => t.id !== taskId));
     } catch (err: any) {
-      alert("Failed to discard task: " + err.message);
+      alert("Failed to delete task: " + err.message);
     }
   };
 
@@ -135,6 +141,7 @@ export const ReviewInboxScreen: React.FC = () => {
         method: "POST",
         body: JSON.stringify({ clarification: text.trim() }),
       });
+      setClarificationInputs((prev) => ({ ...prev, [taskId]: "" }));
       loadReviewTasks();
     } catch (err: any) {
       alert("Failed to submit clarification: " + err.message);
@@ -161,41 +168,63 @@ export const ReviewInboxScreen: React.FC = () => {
     }
   };
 
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      if (activeFilter === "clarification") return t.needs_clarification;
+      if (activeFilter === "high_conf") return (t.confidence ?? 0.8) >= 0.85;
+      return true;
+    });
+  }, [tasks, activeFilter]);
+
   const confidenceBadge = (confidence?: number) => {
     const val = Math.round((confidence ?? 0.8) * 100);
-    let colorClass = "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800";
+    let colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
     if (val < 65) {
-      colorClass = "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800";
+      colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
     } else if (val < 85) {
-      colorClass = "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800";
+      colorClass = "bg-amber-500/10 text-amber-400 border-amber-500/20";
     }
     return (
-      <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${colorClass}`}>
+      <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold border ${colorClass}`}>
         {val}% confidence
       </span>
     );
   };
 
+  const priorityColor = (priority: string) => {
+    switch (priority) {
+      case "urgent":
+        return "text-rose-400 bg-rose-500/10 border-rose-500/20";
+      case "high":
+        return "text-orange-400 bg-orange-500/10 border-orange-500/20";
+      case "med":
+        return "text-amber-400 bg-amber-500/10 border-amber-500/20";
+      case "low":
+      default:
+        return "text-zinc-400 bg-zinc-800 border-zinc-700/60";
+    }
+  };
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-zinc-800 pb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-            <span>Review Inbox</span>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-mono font-semibold">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">Review Inbox</h1>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
               {tasks.length} Pending
             </span>
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Review newly extracted tasks, confirm accuracy, or clarify ambiguities before scheduling
+          </div>
+          <p className="text-xs text-zinc-400 mt-1">
+            Verify extracted instructions, listen to source audio quotes, or clarify questions before scheduling.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={loadReviewTasks}
-            className="p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-2.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 border border-transparent hover:border-zinc-700 transition-all"
             title="Refresh inbox"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
@@ -204,95 +233,137 @@ export const ReviewInboxScreen: React.FC = () => {
             <button
               onClick={handleBulkConfirm}
               disabled={isBulkConfirming}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-md active:scale-95 transition-all disabled:opacity-50"
             >
-              <CheckCheck className="w-4 h-4" />
+              <CheckCheck className="w-4 h-4 text-emerald-600" />
               <span>{isBulkConfirming ? "Confirming..." : `Confirm All (${tasks.length})`}</span>
             </button>
           )}
         </div>
       </div>
 
+      {/* Filter Tabs */}
+      {tasks.length > 0 && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveFilter("all")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeFilter === "all"
+                ? "bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-sm"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+            }`}
+          >
+            All Tasks ({tasks.length})
+          </button>
+          <button
+            onClick={() => setActiveFilter("clarification")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeFilter === "clarification"
+                ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+            }`}
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+            <span>Needs Clarification ({tasks.filter((t) => t.needs_clarification).length})</span>
+          </button>
+          <button
+            onClick={() => setActiveFilter("high_conf")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeFilter === "high_conf"
+                ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            <span>High Confidence ({tasks.filter((t) => (t.confidence ?? 0.8) >= 0.85).length})</span>
+          </button>
+        </div>
+      )}
+
       {error && (
-        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-3">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
           <span>{error}</span>
         </div>
       )}
 
       {loading && (
         <div className="space-y-4">
-          <div className="h-36 rounded-2xl bg-slate-200/60 dark:bg-slate-800/40 animate-pulse" />
-          <div className="h-36 rounded-2xl bg-slate-200/60 dark:bg-slate-800/40 animate-pulse" />
+          <div className="h-32 rounded-2xl bg-zinc-900/60 border border-zinc-800 animate-pulse" />
+          <div className="h-32 rounded-2xl bg-zinc-900/60 border border-zinc-800 animate-pulse" />
         </div>
       )}
 
       {!loading && tasks.length === 0 && (
-        <div className="text-center py-20 px-4 bg-white dark:bg-slate-900/50 rounded-2xl border border-dashed border-slate-300 dark:border-slate-800">
-          <Sparkles className="w-12 h-12 text-emerald-500/60 mx-auto mb-3" />
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
-            Inbox Zero! No tasks pending review.
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-1">
-            All extracted tasks have been confirmed or discarded. When you record next, new tasks will appear here.
+        <div className="text-center py-20 px-4 bg-zinc-900/40 rounded-2xl border border-dashed border-zinc-800 backdrop-blur-sm">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-4 text-emerald-400">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <h2 className="text-base font-semibold text-zinc-200">Inbox Zero</h2>
+          <p className="text-xs text-zinc-400 max-w-sm mx-auto mt-1 leading-relaxed">
+            All extracted tasks have been confirmed or scheduled. Record another session to capture new work items.
           </p>
         </div>
       )}
 
       {/* Task Cards */}
       <div className="space-y-4">
-        {tasks.map((task) => {
+        {filteredTasks.map((task) => {
           const isAudioOpen = activeAudioTaskId === task.id;
           return (
             <div
               key={task.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-4"
+              className="bg-zinc-900/70 border border-zinc-800 hover:border-zinc-700/80 rounded-2xl p-5 shadow-sm transition-all space-y-4 backdrop-blur-sm group"
             >
               {/* Card Header */}
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                <div className="flex-1 space-y-1">
+                <div className="flex-1 space-y-1.5">
                   <div className="flex items-center gap-2 flex-wrap">
                     {confidenceBadge(task.confidence)}
-                    <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-md border bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700">
+                    <span
+                      className={`px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-md border ${priorityColor(
+                        task.priority
+                      )}`}
+                    >
                       {task.priority}
                     </span>
                     {task.requested_by && (
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
-                        requested by <strong className="text-slate-700 dark:text-slate-200">{task.requested_by}</strong>
+                      <span className="text-xs text-zinc-400">
+                        from <strong className="text-zinc-200 font-medium">{task.requested_by}</strong>
                       </span>
                     )}
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">
+                  <h3 className="text-base font-semibold text-zinc-100 leading-snug">
                     {task.title}
                   </h3>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
+                  <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
                     {task.description}
                   </p>
                 </div>
 
-                {/* Top Action Buttons (Confirm / Discard) */}
-                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-start">
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-start">
                   <button
                     onClick={() => setEditingTask(task)}
-                    className="p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="p-2 rounded-xl text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800 transition-colors"
                     title="Edit task"
                   >
-                    <Edit2 className="w-4 h-4" />
+                    <Edit2 className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => handleDiscard(task.id)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 text-xs font-semibold transition-colors"
                     title="Discard task"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-3.5 h-3.5" />
                     <span>Discard</span>
                   </button>
                   <button
                     onClick={() => handleConfirm(task.id)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-sm transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-transform active:scale-95"
                     title="Confirm task"
                   >
-                    <Check className="w-4 h-4" />
+                    <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
                     <span>Confirm</span>
                   </button>
                 </div>
@@ -300,27 +371,30 @@ export const ReviewInboxScreen: React.FC = () => {
 
               {/* Clarification Alert & Input */}
               {task.needs_clarification && (
-                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-300 dark:border-amber-800/80 text-xs space-y-2">
-                  <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300 font-semibold">
-                    <HelpCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs space-y-2.5">
+                  <div className="flex items-start gap-2 text-amber-300 font-medium">
+                    <HelpCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
                     <div>
-                      <span>Clarification Question: </span>
-                      <span className="font-normal">{task.clarification_question || "Please verify the deadline or requirements."}</span>
+                      <span className="font-semibold text-amber-200">Clarification Needed: </span>
+                      <span>{task.clarification_question || "Please verify the deadline or requirements."}</span>
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Type your clarification answer..."
+                      placeholder="Type clarification note to append to task..."
                       value={clarificationInputs[task.id] || ""}
                       onChange={(e) =>
                         setClarificationInputs({ ...clarificationInputs, [task.id]: e.target.value })
                       }
-                      className="flex-1 px-3 py-1.5 rounded-lg border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAnswerClarification(task.id);
+                      }}
+                      className="flex-1 px-3 py-1.5 rounded-lg border border-amber-500/30 bg-zinc-950/70 text-zinc-200 text-xs focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-zinc-500"
                     />
                     <button
                       onClick={() => handleAnswerClarification(task.id)}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg shrink-0"
+                      className="px-3.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold rounded-lg shrink-0 transition-colors"
                     >
                       Resolve
                     </button>
@@ -330,39 +404,38 @@ export const ReviewInboxScreen: React.FC = () => {
 
               {/* Source Quotes & Timestamp Audio Player */}
               {(task.source_quote_original || task.source_quote_english) && (
-                <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800 text-xs space-y-2">
+                <div className="bg-zinc-950/50 p-3.5 rounded-xl border border-zinc-800/80 text-xs space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-400 uppercase text-[10px] tracking-wider">
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
                       Spoken Source Quote
                     </span>
-                    {task.session_id && task.start_ms !== undefined && task.start_ms !== null && (
+                    {task.session_id && (
                       <button
-                        onClick={() =>
-                          setActiveAudioTaskId(isAudioOpen ? null : task.id)
-                        }
-                        className="flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+                        type="button"
+                        onClick={() => setActiveAudioTaskId(isAudioOpen ? null : task.id)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-zinc-300 hover:text-white transition-colors"
                       >
-                        <Volume2 className="w-3.5 h-3.5" />
-                        <span>{isAudioOpen ? "Hide Audio" : "Play Spoken Audio"}</span>
+                        <Volume2 className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>{isAudioOpen ? "Hide Audio Player" : "Listen to Clip"}</span>
                       </button>
                     )}
                   </div>
 
                   {task.source_quote_original && (
-                    <div className="text-slate-700 dark:text-slate-300 italic font-serif">
+                    <div className="text-zinc-200 italic font-serif text-[13px] leading-relaxed">
                       "{task.source_quote_original}"
                     </div>
                   )}
 
                   {task.source_quote_english && task.source_quote_english !== task.source_quote_original && (
-                    <div className="text-slate-500 dark:text-slate-400 text-[11px]">
+                    <div className="text-zinc-400 text-[11px] leading-relaxed">
                       Translation: "{task.source_quote_english}"
                     </div>
                   )}
 
                   {/* Inline Audio Player Slice */}
                   {isAudioOpen && task.session_id && (
-                    <div className="pt-2">
+                    <div className="pt-2 animate-in fade-in duration-200">
                       <AudioPlayer
                         sessionId={task.session_id}
                         initialSeekMs={task.start_ms || 0}
@@ -377,11 +450,11 @@ export const ReviewInboxScreen: React.FC = () => {
               )}
 
               {/* Card Meta Footer */}
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-1">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between text-xs text-zinc-400 pt-1 border-t border-zinc-850">
+                <div className="flex items-center gap-4 flex-wrap">
                   {task.due_at && (
-                    <span className="flex items-center gap-1 font-mono text-[11px]">
-                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-300">
+                      <Calendar className="w-3.5 h-3.5 text-zinc-500" />
                       {new Date(task.due_at).toLocaleString([], {
                         month: "short",
                         day: "numeric",
@@ -391,10 +464,14 @@ export const ReviewInboxScreen: React.FC = () => {
                     </span>
                   )}
                   {task.tags && task.tags.length > 0 && (
-                    <span className="flex items-center gap-1 text-[11px]">
-                      <Tag className="w-3 h-3 text-slate-400" />
-                      {task.tags.join(", ")}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Tag className="w-3 h-3 text-zinc-500" />
+                      {task.tags.map((tag) => (
+                        <span key={tag} className="px-1.5 py-0.5 rounded bg-zinc-800 text-[10px] text-zinc-400">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
@@ -405,13 +482,13 @@ export const ReviewInboxScreen: React.FC = () => {
 
       {/* Edit Task Modal */}
       {editingTask && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-900 dark:text-white text-base">Edit Extracted Task</h3>
+              <h3 className="font-bold text-zinc-100 text-base">Edit Extracted Task</h3>
               <button
                 onClick={() => setEditingTask(null)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm"
+                className="text-zinc-400 hover:text-zinc-200 text-sm p-1 rounded-lg hover:bg-zinc-800 transition-colors"
               >
                 ✕
               </button>
@@ -419,40 +496,40 @@ export const ReviewInboxScreen: React.FC = () => {
 
             <form onSubmit={handleSaveEdit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
                   Title
                 </label>
                 <input
                   type="text"
                   value={editingTask.title}
                   onChange={(e) => setEditingTask({ ...editingTask, title: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                  Self-Contained Description
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                  Description
                 </label>
                 <textarea
                   rows={4}
                   value={editingTask.description}
                   onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  required
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">
                     Priority
                   </label>
                   <select
                     value={editingTask.priority}
-                    onChange={(e: any) =>
-                      setEditingTask({ ...editingTask, priority: e.target.value })
-                    }
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    onChange={(e: any) => setEditingTask({ ...editingTask, priority: e.target.value })}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
                   >
                     <option value="low">Low</option>
                     <option value="med">Medium</option>
@@ -462,8 +539,8 @@ export const ReviewInboxScreen: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    Due Date & Time
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                    Due Date (Optional)
                   </label>
                   <input
                     type="datetime-local"
@@ -478,7 +555,7 @@ export const ReviewInboxScreen: React.FC = () => {
                         due_at: e.target.value ? new Date(e.target.value).toISOString() : null,
                       })
                     }
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
                   />
                 </div>
               </div>
@@ -487,13 +564,13 @@ export const ReviewInboxScreen: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setEditingTask(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                  className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-xl shadow-sm"
+                  className="px-5 py-2 text-xs font-semibold bg-zinc-100 hover:bg-white text-zinc-950 rounded-xl shadow-sm transition-transform active:scale-95"
                 >
                   Save Changes
                 </button>

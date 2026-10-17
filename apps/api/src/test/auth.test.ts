@@ -6,14 +6,27 @@ import type { FastifyInstance } from "fastify";
 describe("Single-User Authentication & Security Flow", () => {
   let app: FastifyInstance;
 
+  let originalUser: { email: string; name: string; password_hash: string } | null = null;
+
   beforeAll(async () => {
-    // Reset any existing test users
+    // Save personal user's profile and hash if set and clear it during auth testing
+    const existing = await pool.query("SELECT email, name, password_hash FROM users WHERE id = 'user_personal_01'");
+    if (existing.rows[0]) {
+      originalUser = existing.rows[0];
+      await pool.query("UPDATE users SET password_hash = NULL WHERE id = 'user_personal_01'");
+    }
     await pool.query("DELETE FROM users WHERE email = 'test_owner@taskcatch.local'");
     app = await buildApp();
     await app.ready();
   });
 
   afterAll(async () => {
+    if (originalUser) {
+      await pool.query(
+        "UPDATE users SET email = $1, name = $2, password_hash = $3 WHERE id = 'user_personal_01'",
+        [originalUser.email, originalUser.name, originalUser.password_hash]
+      );
+    }
     await app.close();
     await closeDatabase();
   });

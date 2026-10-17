@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initDatabase, pool } from "../db/index.js";
 import { dbQueries } from "../db/queries.js";
 import { PipelineOrchestrator } from "../pipeline/orchestrator.js";
@@ -6,11 +6,22 @@ import { MockSpeechProvider } from "../providers/mockSpeechProvider.js";
 import { MockLLMProvider } from "../providers/mockLLMProvider.js";
 
 describe("Pipeline Orchestrator with PostgreSQL", () => {
+  const testUserId = "user_test_pipeline_pg";
+
   beforeAll(async () => {
     await initDatabase();
     await pool.query(
-      `INSERT INTO users (id, name) VALUES ('user_test_pipeline_pg', 'Test Pipeline User PG') ON CONFLICT (id) DO NOTHING`
+      `INSERT INTO users (id, name, email) VALUES ($1, 'Test Pipeline User PG', 'test_pipeline@taskcatch.test') ON CONFLICT (id) DO NOTHING`,
+      [testUserId]
     );
+    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [testUserId]);
+    await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [testUserId]);
+  });
+
+  afterAll(async () => {
+    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [testUserId]);
+    await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [testUserId]);
+    await pool.query(`DELETE FROM users WHERE id = $1`, [testUserId]);
   });
 
   it("processes a multilingual Hindi session end-to-end and saves to Postgres", async () => {
@@ -21,7 +32,7 @@ describe("Pipeline Orchestrator with PostgreSQL", () => {
 
     // Create session with audio path hinting hindi
     const session = await dbQueries.createSession({
-      userId: "user_test_pipeline_pg",
+      userId: testUserId,
       deviceId: "phone_android",
       audioPath: "hindi_conversation.wav",
       status: "uploaded",
@@ -45,7 +56,7 @@ describe("Pipeline Orchestrator with PostgreSQL", () => {
 
     // Verify tasks extracted and saved to PostgreSQL
     const tasks = await dbQueries.listTasks({
-      userId: "user_test_pipeline_pg",
+      userId: testUserId,
       sessionId: session.id,
     });
     expect(tasks.length).toBeGreaterThan(0);

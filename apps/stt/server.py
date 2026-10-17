@@ -6,6 +6,7 @@ import os
 import resource
 import time
 import unicodedata
+from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -19,15 +20,6 @@ try:
 except ImportError:
     WhisperModel = None
 
-app = FastAPI(title="TaskCatch STT Sidecar", version="1.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # ── Indian Language Normalisation and Quirks ────────────────────────────────
 _LANG_NORMALISE = {
@@ -115,9 +107,25 @@ class STTModelManager:
 
 manager = STTModelManager()
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(manager.idle_reaper_loop())
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    reaper_task = asyncio.create_task(manager.idle_reaper_loop())
+    try:
+        yield
+    finally:
+        reaper_task.cancel()
+
+
+app = FastAPI(title="TaskCatch STT Sidecar", version="1.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 async def health():

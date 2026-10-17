@@ -84,17 +84,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       )}
 
       {/* Top Header Desktop/Tablet */}
-      <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors">
+      <header className="sticky top-0 z-40 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800/80 transition-colors">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center space-x-3 cursor-pointer" onClick={() => onSelectTab("today")}>
-            <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white shadow-sm font-bold text-sm">
+            <div className="w-8 h-8 rounded-xl bg-zinc-900 dark:bg-zinc-50 flex items-center justify-center text-white dark:text-zinc-900 font-bold text-xs tracking-wider shadow-xs">
               TC
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-slate-900 dark:text-white leading-tight tracking-tight">
+              <span className="font-bold text-zinc-900 dark:text-zinc-100 leading-tight tracking-tight text-sm">
                 TaskCatch
               </span>
-              <span className="text-[10px] text-slate-500 font-mono">Personal AI Capture</span>
+              <span className="text-[10px] text-zinc-500 font-mono">Personal AI Capture</span>
             </div>
           </div>
 
@@ -107,13 +107,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   key={item.id}
                   onClick={() => onSelectTab(item.id)}
-                  className={`relative flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  className={`relative flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
                     isActive
-                      ? "bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-brand-300 font-semibold"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-semibold shadow-2xs"
+                      : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/50"
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-3.5 h-3.5" />
                   <span>{item.label}</span>
                   {item.badge !== undefined && (
                     <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white animate-pulse">
@@ -126,24 +126,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
 
           {/* Status & Theme Controls */}
-          <div className="flex items-center space-x-3">
-            {/* Live Socket Status Dot */}
+          <div className="flex items-center space-x-2.5">
+            {/* Live Socket Status Badge */}
             <div
-              className="flex items-center space-x-1.5 text-xs text-slate-500 font-mono"
+              className={`flex items-center space-x-1.5 px-2 py-1 rounded-full text-[11px] font-mono border transition-all ${
+                isConnected
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                  : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20"
+              }`}
               title={isConnected ? "WebSocket Connected" : "Connecting..."}
             >
               <span
-                className={`w-2 h-2 rounded-full ${
+                className={`w-1.5 h-1.5 rounded-full ${
                   isConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
                 }`}
               />
-              <span className="hidden sm:inline">{isConnected ? "Live" : "Offline"}</span>
+              <span className="hidden sm:inline">{isConnected ? "Connected" : "Offline"}</span>
             </div>
 
             {/* Dark Mode Toggle */}
             <button
               onClick={() => setIsDark(!isDark)}
-              className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-xl text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700"
               title="Toggle theme"
             >
               {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
@@ -153,7 +157,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </header>
 
       {/* Mobile Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg border-t border-slate-200 dark:border-slate-800 flex items-center justify-around py-1.5 px-1 shadow-lg">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-lg border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-around py-1.5 px-1 shadow-lg">
         {navItems.slice(0, 5).map((item) => {
           const Icon = item.icon;
           const isActive = currentTab === item.id;
@@ -163,8 +167,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => onSelectTab(item.id)}
               className={`relative flex flex-col items-center justify-center p-2 rounded-xl transition-all ${
                 isActive
-                  ? "text-brand-600 dark:text-brand-400 font-semibold"
-                  : "text-slate-500 dark:text-slate-400"
+                  ? "text-zinc-900 dark:text-zinc-100 font-semibold"
+                  : "text-zinc-500 dark:text-zinc-400"
               }`}
             >
               <div className="relative">

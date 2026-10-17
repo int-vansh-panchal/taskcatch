@@ -25,10 +25,42 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function buildApp() {
   const app = fastify({
-    logger: {
-      level: config.env === "development" ? "info" : "warn",
-    },
+    logger:
+      config.env === "development"
+        ? {
+            level: "info",
+            transport: {
+              target: "pino-pretty",
+              options: {
+                colorize: true,
+                translateTime: "HH:MM:ss",
+                ignore: "pid,hostname",
+              },
+            },
+          }
+        : {
+            level: "warn",
+          },
   });
+
+  // Support empty JSON bodies gracefully without throwing FST_ERR_CTP_EMPTY_JSON_BODY
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (req, body: string, done) => {
+      if (!body || body.trim() === "") {
+        done(null, {});
+        return;
+      }
+      try {
+        const json = JSON.parse(body);
+        done(null, json);
+      } catch (err: any) {
+        err.statusCode = 400;
+        done(err, undefined);
+      }
+    }
+  );
 
   // Database initialization (PostgreSQL 16)
   await initDatabase();
@@ -144,6 +176,13 @@ export async function buildApp() {
       root: webDistPath,
       prefix: "/",
       wildcard: false,
+      setHeaders(res, filePath) {
+        if (filePath.endsWith("index.html")) {
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        } else if (filePath.includes("/assets/")) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
     });
 
     app.setNotFoundHandler((request, reply) => {
@@ -152,6 +191,7 @@ export async function buildApp() {
         return reply.status(404).send({ error: "Route not found" });
       }
       // Single Page Application fallback for client-side routing
+      reply.header("Cache-Control", "no-cache, no-store, must-revalidate");
       return (reply as any).sendFile("index.html");
     });
   }

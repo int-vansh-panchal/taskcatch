@@ -1,4 +1,4 @@
-import { set, get, del, entries } from "idb-keyval";
+import { set, del, entries } from "idb-keyval";
 import { apiRequest } from "../api";
 
 export interface AudioChunkRecord {
@@ -18,6 +18,7 @@ export class AudioRecordingService {
   private sessionId: string | null = null;
   private partCounter = 0;
   private isRecording = false;
+  private pendingUploads: Set<Promise<any>> = new Set();
 
   public onVolumeChange?: (volume: number, frequencyData: Uint8Array) => void;
   public onChunkUploaded?: (partNumber: number) => void;
@@ -25,6 +26,7 @@ export class AudioRecordingService {
   async startRecording(sessionId: string): Promise<void> {
     this.sessionId = sessionId;
     this.partCounter = 0;
+    this.pendingUploads.clear();
 
     // 1. Request Microphone stream
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -62,10 +64,13 @@ export class AudioRecordingService {
       audioBitsPerSecond: 32000, // 32kbps opus mono is extremely lightweight and clear
     });
 
-    this.mediaRecorder.ondataavailable = async (event: BlobEvent) => {
+    this.mediaRecorder.ondataavailable = (event: BlobEvent) => {
       if (event.data && event.data.size > 0 && this.sessionId) {
         const partNumber = this.partCounter++;
-        await this.handleChunk(this.sessionId, partNumber, event.data);
+        const p = this.handleChunk(this.sessionId, partNumber, event.data)
+          .catch((err) => console.warn("[Recorder] Chunk error:", err))
+          .finally(() => this.pendingUploads.delete(p));
+        this.pendingUploads.add(p);
       }
     };
 
@@ -80,23 +85,66 @@ export class AudioRecordingService {
     const currentSessionId = this.sessionId;
     this.isRecording = false;
 
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      this.mediaRecorder.stop();
-    }
+    return new Promise<string>((resolve, reject) => {
+      const finalize = async () => {
+        try {
+          // Wait for all in-flight chunk upload promises to settle
+          await Promise.allSettled(Array.from(this.pendingUploads));
 
+          // Flush any offline chunks saved to IndexedDB
+          if (currentSessionId) {
+            await this.flushQueue(currentSessionId);
+            // Notify server that all chunks are uploaded and trigger processing
+            await apiRequest(`/api/sessions/${currentSessionId}/finish`, {
+              method: "POST",
+            });
+          }
+
+          this.cleanupResources();
+          resolve(currentSessionId || "");
+        } catch (err) {
+          this.cleanupResources();
+          reject(err);
+        }
+      };
+
+      if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
+        finalize();
+        return;
+      }
+
+      // MediaRecorder fires onstop after the final ondataavailable event
+      this.mediaRecorder.onstop = () => {
+        finalize();
+      };
+
+      // Request any remaining audio buffer and stop
+      try {
+        if (this.mediaRecorder.state === "recording") {
+          this.mediaRecorder.requestData();
+        }
+        this.mediaRecorder.stop();
+      } catch (err) {
+        console.warn("[Recorder] Error calling stop():", err);
+        finalize();
+      }
+    });
+  }
+
+  private cleanupResources() {
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
     }
 
     if (this.audioContext) {
-      this.audioContext.close();
+      this.audioContext.close().catch(() => {});
       this.audioContext = null;
     }
 
     if (this.wakeLock) {
       try {
-        await this.wakeLock.release();
+        this.wakeLock.release();
       } catch {
         // ignore
       }
@@ -104,24 +152,16 @@ export class AudioRecordingService {
     }
 
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
-
-    // Finalize session on server
-    if (currentSessionId) {
-      await this.flushQueue(currentSessionId);
-      await apiRequest(`/api/sessions/${currentSessionId}/finish`, {
-        method: "POST",
-      });
-    }
-
-    return currentSessionId || "";
+    this.mediaRecorder = null;
+    this.pendingUploads.clear();
   }
 
-  async addBookmark(label?: string): Promise<any> {
+  async addBookmark(timestampMs: number, label?: string): Promise<any> {
     if (!this.sessionId) return;
     return apiRequest(`/api/sessions/${this.sessionId}/bookmarks`, {
       method: "POST",
       body: JSON.stringify({
-        timestampMs: Date.now(), // Handled relatively on server
+        timestampMs: Math.max(0, Math.round(timestampMs)),
         label: label || "Bookmark",
       }),
     });

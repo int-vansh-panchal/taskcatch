@@ -14,6 +14,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   highlightRange,
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pendingSeekRef = useRef<number | null>(initialSeekMs !== undefined ? initialSeekMs / 1000 : null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -28,14 +29,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           `/api/audio/${sessionId}/token`,
           { method: "POST" }
         );
-        if (!unmounted) {
+        if (!unmounted && tokenRes?.streamUrl) {
           setStreamUrl(tokenRes.streamUrl);
+          return;
         }
       } catch {
-        // Fallback to direct session stream
-        if (!unmounted) {
-          setStreamUrl(`/api/audio/stream/${sessionId}`);
-        }
+        // Fallback to direct stream
+      }
+
+      if (!unmounted) {
+        setStreamUrl(`/api/audio/stream/${sessionId}`);
       }
     }
     loadSignedStream();
@@ -45,11 +48,28 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   }, [sessionId]);
 
   useEffect(() => {
-    if (initialSeekMs !== undefined && audioRef.current) {
-      audioRef.current.currentTime = initialSeekMs / 1000;
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+    if (initialSeekMs !== undefined) {
+      const seekSec = initialSeekMs / 1000;
+      if (audioRef.current && audioRef.current.readyState >= 1) {
+        audioRef.current.currentTime = seekSec;
+        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      } else {
+        pendingSeekRef.current = seekSec;
+      }
     }
   }, [initialSeekMs]);
+
+  const handleLoadedMetadata = () => {
+    if (!audioRef.current) return;
+    const dur = audioRef.current.duration || 0;
+    setDuration(dur);
+
+    if (pendingSeekRef.current !== null) {
+      audioRef.current.currentTime = pendingSeekRef.current;
+      pendingSeekRef.current = null;
+      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+    }
+  };
 
   const togglePlay = () => {
     if (!audioRef.current) return;
@@ -80,22 +100,25 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   };
 
   const formatTime = (sec: number) => {
+    if (isNaN(sec) || !isFinite(sec)) return "0:00";
     const mins = Math.floor(sec / 60);
     const secs = Math.floor(sec % 60);
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
   return (
-    <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-sm">
+    <div className="bg-zinc-950/80 dark:bg-zinc-900/90 border border-zinc-800/80 rounded-xl p-3 shadow-lg backdrop-blur-md">
       {streamUrl && (
         <audio
           ref={audioRef}
           src={streamUrl}
+          preload="metadata"
           onTimeUpdate={() => {
             if (audioRef.current) {
               setCurrentTime(audioRef.current.currentTime);
               if (
                 highlightRange &&
+                highlightRange.endMs &&
                 audioRef.current.currentTime >= highlightRange.endMs / 1000
               ) {
                 audioRef.current.pause();
@@ -103,19 +126,28 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               }
             }
           }}
-          onLoadedMetadata={() => {
-            if (audioRef.current) setDuration(audioRef.current.duration || 0);
+          onLoadedMetadata={handleLoadedMetadata}
+          onCanPlay={() => {
+            if (pendingSeekRef.current !== null && audioRef.current) {
+              audioRef.current.currentTime = pendingSeekRef.current;
+              pendingSeekRef.current = null;
+              audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+            }
           }}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
         />
       )}
 
       <div className="flex items-center space-x-3">
         <button
+          type="button"
           onClick={togglePlay}
-          className="w-10 h-10 rounded-full bg-brand-600 hover:bg-brand-500 text-white flex items-center justify-center transition-colors shadow-sm"
+          className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-white text-zinc-900 flex items-center justify-center transition-transform active:scale-95 shadow-sm shrink-0"
+          title={isPlaying ? "Pause" : "Play"}
         >
-          {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+          {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
         </button>
 
         <div className="flex-1 space-y-1">
@@ -126,17 +158,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             step={0.1}
             value={currentTime}
             onChange={handleSeek}
-            className="w-full accent-brand-600 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg cursor-pointer"
+            className="w-full accent-white h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
           />
-          <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
+          <div className="flex justify-between text-[11px] text-zinc-400 font-mono">
             <span>{formatTime(currentTime)}</span>
             <span>{formatTime(duration)}</span>
           </div>
         </div>
 
         <button
+          type="button"
           onClick={cycleSpeed}
-          className="px-2 py-1 text-xs font-semibold rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+          className="px-2 py-1 text-[11px] font-mono font-medium rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors shrink-0"
           title="Playback speed"
         >
           {playbackRate}x

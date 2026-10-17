@@ -224,6 +224,7 @@ export type WebSocketServerEvent =
   | { type: "task.created"; task: Task }
   | { type: "task.updated"; task: Task }
   | { type: "task.dismissed"; taskId: string }
+  | { type: "task.deleted"; taskId: string }
   | { type: "reminder.fired"; reminder: Reminder; task: Task };
 
 export type WebSocketClientMessage =

@@ -376,6 +376,10 @@ export const dbQueries = {
       setClauses.push(`clarification_question = $${idx++}`);
       values.push(updates.clarification_question);
     }
+    if ((updates as any).requested_by !== undefined) {
+      setClauses.push(`requested_by = $${idx++}`);
+      values.push((updates as any).requested_by || null);
+    }
 
     values.push(id);
     const res = await pool.query(
@@ -389,6 +393,11 @@ export const dbQueries = {
 
     const row = res.rows[0];
     return row ? toTask(row) : null;
+  },
+
+  async deleteTask(id: string): Promise<boolean> {
+    const res = await pool.query(`DELETE FROM tasks WHERE id = $1 RETURNING id`, [id]);
+    return (res.rowCount ?? 0) > 0;
   },
 
   async searchTasks(userId: string, query: string, limit = 50): Promise<Task[]> {

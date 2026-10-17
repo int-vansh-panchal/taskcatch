@@ -20,6 +20,7 @@ const UpdateTaskBodySchema = z.object({
   priority: z.enum(["low", "med", "high", "urgent"]).optional(),
   due_at: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
+  requested_by: z.string().nullable().optional(),
   snoozed_until: z.string().nullable().optional(),
   needs_clarification: z.boolean().optional(),
   clarification_question: z.string().nullable().optional(),
@@ -46,19 +47,24 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   // ── Today View ─────────────────────────────────────────────────────────────
   fastify.get("/today", async (req, reply) => {
     const userId = config.defaultUserId;
-    const allOpenTasks = await dbQueries.listTasks({ userId, limit: 200 });
+    const allTasks = await dbQueries.listTasks({ userId, limit: 300 });
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const endOfToday = startOfToday + 24 * 60 * 60 * 1000 - 1;
 
-    const overdue: typeof allOpenTasks = [];
-    const dueToday: typeof allOpenTasks = [];
-    const upcoming: typeof allOpenTasks = [];
-    const noDate: typeof allOpenTasks = [];
+    const overdue: typeof allTasks = [];
+    const dueToday: typeof allTasks = [];
+    const upcoming: typeof allTasks = [];
+    const noDate: typeof allTasks = [];
+    const completed: typeof allTasks = [];
 
-    for (const t of allOpenTasks) {
-      if (t.status === "done" || t.status === "discarded") continue;
+    for (const t of allTasks) {
+      if (t.status === "done") {
+        completed.push(t);
+        continue;
+      }
+      if (t.status === "discarded") continue;
 
       if (!t.due_at) {
         noDate.push(t);
@@ -78,8 +84,9 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({
       overdue,
       dueToday,
-      upcoming: upcoming.slice(0, 10),
+      upcoming: upcoming.slice(0, 20),
       noDate,
+      completed: completed.slice(0, 50),
     });
   });
 
@@ -170,5 +177,21 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     return reply.send({ task: updated });
+  });
+
+  // ── Delete Task ────────────────────────────────────────────────────────────
+  fastify.delete("/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const success = await dbQueries.deleteTask(id);
+    if (!success) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
+
+    wsService.broadcastToUser(config.defaultUserId, {
+      type: "task.deleted",
+      taskId: id,
+    });
+
+    return reply.send({ success: true, message: "Task deleted successfully" });
   });
 };

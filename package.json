@@ -8,13 +8,19 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspaces --if-present",
+    "dev": "./scripts/dev.sh",
+    "dev:all": "./scripts/dev.sh --all",
+    "logs": "./scripts/logs.sh",
+    "services:start": "systemctl --user start taskcatch-postgres taskcatch-stt taskcatch-api",
+    "services:stop": "systemctl --user stop taskcatch-api taskcatch-stt",
+    "services:status": "systemctl --user status taskcatch-postgres taskcatch-stt taskcatch-api --no-pager",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,css,md}\""
   },
   "devDependencies": {
+    "concurrently": "^10.0.6",
     "prettier": "^3.3.3",
     "typescript": "^5.5.4"
   }
